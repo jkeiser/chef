@@ -471,6 +471,32 @@ EOM
       constraints = environment['cookbook_versions']
       json_response(200, format_cookbooks_list(rest_path[0..-2], base_uri, cookbooks, constraints))
     end
+
+    def child(name)
+      puts "#{name}: #{cookbooks.keys}"
+      if cookbooks[name]
+        EnvironmentCookbookEndpoint.new(environments, cookbooks)
+      else
+        nil
+      end
+    end
+  end
+
+  class EnvironmentCookbookEndpoint < CookbooksBase
+    def initialize(environments, cookbooks)
+      super(cookbooks)
+      @environments = environments
+    end
+
+    attr_reader :environments
+
+    def get(rest_path, base_uri, body_io)
+      name = rest_path[-3]
+      cookbook_name = rest_path[-1]
+      environment = JSON.parse(environments[name], :create_additions => false)
+      constraints = environment['cookbook_versions']
+      json_response(200, format_cookbooks_list(rest_path[0..-3], base_uri, { cookbook_name => cookbooks[cookbook_name] }, constraints))
+    end
   end
 end
 
