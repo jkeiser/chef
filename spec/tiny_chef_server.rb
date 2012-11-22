@@ -20,6 +20,8 @@ require 'rubygems'
 require 'webrick'
 require 'rack'
 require 'json'
+require 'chef/version_class'
+require 'chef/version_constraint'
 
 class TinyChefServer < Rack::Server
   def initialize(options)
@@ -114,7 +116,7 @@ EOM
         'clients' => ClientsEndpoint.new(server.data[:clients], 'name'),
         'cookbooks' => CookbooksEndpoint.new(server.data[:cookbooks]),
         'data' => DataBagsEndpoint.new(server.data[:data], 'name'),
-        'environments' => EnvironmentsListEndpoint.new(server.data[:environments], 'name'),
+        'environments' => EnvironmentsEndpoint.new(server.data[:environments], 'name', server.data[:cookbooks]),
         'nodes' => RestListEndpoint.new(server.data[:nodes], 'name'),
         'roles' => RestListEndpoint.new(server.data[:roles], 'name'),
         'sandboxes' => SandboxesEndpoint.new(server.data[:file_store], server.data[:sandboxes]),
@@ -175,7 +177,7 @@ EOM
     end
     def put(rest_path, base_uri, body_io)
       key = rest_path[-1]
-      parent_hash[key] = contents
+      parent_hash[key] = body_io.read
       already_json_response(200, parent_hash[key])
     end
     def delete(rest_path, base_uri, body_io)
@@ -201,19 +203,41 @@ EOM
     end
   end
 
-  class EnvironmentsListEndpoint < RestListEndpoint
+  class EnvironmentsEndpoint < RestListEndpoint
+    def initialize(hash, identity_key, cookbooks)
+      super(hash, identity_key)
+      @cookbooks = cookbooks
+    end
+
+    attr_reader :cookbooks
+
     def child(name)
       return nil if !hash[name]
-      @child_endpoint ||= EnvironmentsObjectEndpoint.new(hash)
+      @child_endpoint ||= EnvironmentEndpoint.new(hash, cookbooks)
     end
   end
 
-  class EnvironmentsObjectEndpoint < RestObjectEndpoint
+  class EnvironmentEndpoint < RestObjectEndpoint
+    def initialize(parent_hash, cookbooks)
+      super(parent_hash)
+      @cookbooks = cookbooks
+    end
+
+    attr_reader :cookbooks
+
     def delete(rest_path, base_uri, body_io)
       if rest_path[-1] == "_default"
         error(403, "_default environment cannot be modified")
       else
         super(rest_path, base_uri, body_io)
+      end
+    end
+
+    def child(name)
+      if name == 'cookbooks'
+        @child_endpoint ||= EnvironmentCookbooksEndpoint.new(parent_hash, cookbooks)
+      else
+        nil
       end
     end
   end
@@ -354,19 +378,25 @@ EOM
 
     attr_reader :cookbooks
 
-    def format_cookbooks_list(rest_path, base_uri, cookbooks_list)
+    def format_cookbooks_list(rest_path, base_uri, cookbooks_list, constraints = {})
       results = {}
       cookbooks_list.keys.sort.each do |name|
-        versions = cookbooks_list[name].keys.sort.map do |version|
-          {
-            'url' => build_uri(base_uri, rest_path + [name, version]),
-            'version' => version
+        constraint = Chef::VersionConstraint.new(constraints[name])
+        versions = {}
+        cookbooks_list[name].keys.sort.each do |version|
+          if constraint.include?(version)
+            versions[version] = {
+              'url' => build_uri(base_uri, rest_path + [name, version]),
+              'version' => version
+            }
+          end
+        end
+        if versions.size > 0
+          results[name] = {
+            'url' => build_uri(base_uri, rest_path + [name]),
+            'versions' => versions
           }
         end
-        results[name] = {
-          'url' => build_uri(base_uri, rest_path + [name]),
-          'versions' => versions
-        }
       end
       results
     end
@@ -399,8 +429,8 @@ EOM
       version = rest_path[-1]
       return error(404, "No cookbook named #{name}") if !cookbooks[name]
       if version == "_latest"
-        # TODO it is highly unlikely that this is the real sort.
-        version = cookbooks[name].keys.sort[-1]
+        sorted_versions = cookbooks[name].keys.sort_by { |version| Chef::Version.new(version) }
+        version = sorted_versions[-1]
       end
       return error(404, "No #{name} cookbooks with version #{version}") if !cookbooks[name][version]
       already_json_response(200, cookbooks[name][version])
@@ -424,6 +454,22 @@ EOM
       cookbooks[name].delete(version)
       cookbooks.delete(name) if cookbooks[name].size == 0
       already_json_response(200, response)
+    end
+  end
+
+  class EnvironmentCookbooksEndpoint < CookbooksBase
+    def initialize(environments, cookbooks)
+      super(cookbooks)
+      @environments = environments
+    end
+
+    attr_reader :environments
+
+    def get(rest_path, base_uri, body_io)
+      name = rest_path[-2]
+      environment = JSON.parse(environments[name], :create_additions => false)
+      constraints = environment['cookbook_versions']
+      json_response(200, format_cookbooks_list(rest_path[0..-2], base_uri, cookbooks, constraints))
     end
   end
 end
