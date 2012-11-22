@@ -30,7 +30,23 @@ class TinyChefServer < Rack::Server
       :clients => {},
       :cookbooks => {},
       :data => {},
-      :environments => {},
+      :environments => {
+        "_default" => <<EOM
+{
+  "name": "_default",
+  "description": "The default Chef environment",
+  "cookbook_versions": {
+  },
+  "json_class": "Chef::Environment",
+  "chef_type": "environment",
+  "default_attributes": {
+  },
+  "override_attributes": {
+  }
+}
+EOM
+      },
+      :file_store => {},
       :nodes => {},
       :roles => {},
       :sandboxes => {}
@@ -96,10 +112,15 @@ class TinyChefServer < Rack::Server
       @server = server
       @children = {
         'clients' => RestListEndpoint.new(server.data[:clients], 'name'),
+        'cookbooks' => CookbooksEndpoint.new(server.data[:cookbooks]),
         'data' => DataBagsEndpoint.new(server.data[:data], 'name'),
         'environments' => EnvironmentsListEndpoint.new(server.data[:environments], 'name'),
         'nodes' => RestListEndpoint.new(server.data[:nodes], 'name'),
-        'roles' => RestListEndpoint.new(server.data[:roles], 'name')
+        'roles' => RestListEndpoint.new(server.data[:roles], 'name'),
+        'sandboxes' => SandboxesEndpoint.new(server.data[:file_store], server.data[:sandboxes]),
+
+        # This endpoint does not exist in the real world.
+        'file_store' => FileStoreEndpoint.new(server.data[:file_store])
       }
     end
     def child(name)
@@ -213,6 +234,181 @@ class TinyChefServer < Rack::Server
       result = parent_hash[key]
       parent_hash.delete(key)
       already_json_response(200, result)
+    end
+  end
+
+  class SandboxesEndpoint < RestBase
+    def initialize(checksums, sandboxes)
+      @checksums = checksums
+      @sandboxes = sandboxes
+      @next_id = 1
+    end
+
+    attr_reader :checksums
+    attr_reader :sandboxes
+
+    def post(rest_path, base_uri, body_io)
+      sandbox_checksums = []
+
+      needed_checksums = JSON.parse(body_io.read, :create_additions => false)['checksums']
+      result_checksums = {}
+      needed_checksums.keys.each do |needed_checksum|
+        if checksums.has_key?(needed_checksum)
+          result_checksums[needed_checksum] = { :needs_upload => false }
+        else
+          result_checksums[needed_checksum] = {
+            :needs_upload => true,
+            :url => build_uri(base_uri, ['file_store', needed_checksum])
+          }
+          sandbox_checksums << needed_checksum
+        end
+      end
+
+      id = @next_id.to_s
+      @next_id+=1
+
+      sandboxes[id] = sandbox_checksums
+
+      json_response(201, {
+        :uri => build_uri(base_uri, rest_path + [id.to_s]),
+        :checksums => result_checksums,
+        :sandbox_id => id
+      })
+    end
+
+    def child(name)
+      if sandboxes[name]
+        @child_endpoint ||= SandboxEndpoint.new(checksums, sandboxes)
+      end
+    end
+  end
+
+  class SandboxEndpoint < RestBase
+    def initialize(checksums, sandboxes)
+      @checksums = checksums
+      @sandboxes = sandboxes
+    end
+
+    attr_reader :checksums
+    attr_reader :sandboxes
+
+    def put(rest_path, base_uri, body_io)
+      sandboxes.delete(rest_path[-1])
+      json_response(200, { :sandbox_id => rest_path[-1]})
+    end
+  end
+
+  class FileStoreEndpoint < RestBase
+    def initialize(file_store)
+      @file_store = file_store
+    end
+
+    attr_reader :file_store
+
+    def child(name)
+      @child_endpoint ||= FileStoreFileEndpoint.new(file_store)
+    end
+  end
+
+  class FileStoreFileEndpoint < RestBase
+    def initialize(file_store)
+      @file_store = file_store
+    end
+
+    attr_reader :file_store
+
+    def get(rest_path, base_uri, body_io)
+      filename = rest_path[-1]
+      if file_store[filename]
+        [200, {"Content-Type" => 'application/x-binary'}, file_store[filename] ]
+      else
+        error(404, "File not found: '#{filename}'")
+      end
+    end
+
+    def put(rest_path, base_uri, body_io)
+      file_store[rest_path[-1]] = body_io.read
+      json_response(200, {})
+    end
+  end
+
+  class CookbooksBase < RestBase
+    def initialize(cookbooks)
+      @cookbooks = cookbooks
+    end
+
+    attr_reader :cookbooks
+
+    def format_cookbooks_list(rest_path, base_uri, cookbooks_list)
+      results = {}
+      cookbooks_list.keys.sort.each do |name|
+        versions = cookbooks_list[name].keys.sort.map do |version|
+          {
+            'url' => build_uri(base_uri, rest_path + [name, version]),
+            'version' => version
+          }
+        end
+        results[name] = {
+          'url' => build_uri(base_uri, rest_path + [name]),
+          'versions' => versions
+        }
+      end
+      results
+    end
+  end
+
+  class CookbooksEndpoint < CookbooksBase
+    def get(rest_path, base_uri, body_io)
+      json_response(200, format_cookbooks_list(rest_path, base_uri, cookbooks))
+    end
+
+    def child(name)
+      @child_endpoint ||= CookbookEndpoint.new(cookbooks)
+    end
+  end
+
+  class CookbookEndpoint < CookbooksBase
+    def get(rest_path, base_uri, body_io)
+      name = rest_path[-1]
+      json_response(200, format_cookbooks_list(rest_path, base_uri, { name => cookbooks[name] }))
+    end
+
+    def child(name)
+      @child_endpoint ||= CookbookVersionEndpoint.new(cookbooks)
+    end
+  end
+
+  class CookbookVersionEndpoint < CookbooksBase
+    def get(rest_path, base_uri, body_io)
+      name = rest_path[-2]
+      version = rest_path[-1]
+      return error(404, "No cookbook named #{name}") if !cookbooks[name]
+      if version == "_latest"
+        # TODO it is highly unlikely that this is the real sort.
+        version = cookbooks[name].keys.sort[-1]
+      end
+      return error(404, "No #{name} cookbooks with version #{version}") if !cookbooks[name][version]
+      already_json_response(200, cookbooks[name][version])
+    end
+
+    def put(rest_path, base_uri, body_io)
+      name = rest_path[-2]
+      version = rest_path[-1]
+      cookbooks[name] = {} if !cookbooks[name]
+      response_code = cookbooks[name][version] ? 200 : 201
+      cookbooks[name][version] = body_io.read
+      already_json_response(response_code, cookbooks[name][version])
+    end
+
+    def delete(rest_path, base_uri, body_io)
+      name = rest_path[-2]
+      version = rest_path[-1]
+      return error(404, "No cookbook named #{name}") if !cookbooks[name]
+      return error(404, "No #{name} cookbooks with version #{version}") if !cookbooks[name][version]
+      response = cookbooks[name][version]
+      cookbooks[name].delete(version)
+      cookbooks.delete(name) if cookbooks[name].size == 0
+      already_json_response(200, response)
     end
   end
 end
