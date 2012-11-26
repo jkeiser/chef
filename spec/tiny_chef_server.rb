@@ -65,6 +65,7 @@ EOM
   class RestBase
     def call(env)
       begin
+        puts "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
         rest_path = env['PATH_INFO'].split('/').select { |part| part != "" }
         handler = self
         rest_path.each do |rest_path_part|
@@ -235,7 +236,9 @@ EOM
 
     def child(name)
       if name == 'cookbooks'
-        @child_endpoint ||= EnvironmentCookbooksEndpoint.new(parent_hash, cookbooks)
+        @cookbooks_endpoint ||= EnvironmentCookbooksEndpoint.new(parent_hash, cookbooks)
+      elsif name == 'cookbook_versions'
+        @cookbook_versions_endpoint ||= EnvironmentCookbookVersionsEndpoint.new(parent_hash, cookbooks)
       else
         nil
       end
@@ -496,6 +499,101 @@ EOM
       environment = JSON.parse(environments[name], :create_additions => false)
       constraints = environment['cookbook_versions']
       json_response(200, format_cookbooks_list(rest_path[0..-3], base_uri, { cookbook_name => cookbooks[cookbook_name] }, constraints))
+    end
+  end
+
+  class EnvironmentCookbookVersionsEndpoint < CookbooksBase
+    def initialize(environments, cookbooks)
+      super(cookbooks)
+      @environments = environments
+    end
+
+    attr_reader :environments
+
+    def post(rest_path, base_uri, body_io)
+      # Get the list of cookbooks and versions desired by the runlist
+      desired_versions = {}
+      run_list = JSON.parse(body_io.read, :create_additions => false)['run_list']
+      run_list.each do |run_list_entry|
+        if run_list_entry =~ /(.+)\@(.+)/
+          error(400, "No such cookbook: #{$1}") if !cookbooks[$1]
+          error(400, "No such cookbook version for cookbook #{$1}: #{$2}") if !cookbooks[$1][$2]
+          desired_versions[$1] = [ $2 ]
+        else
+          error(400, "No such cookbook: #{run_list_entry}") if !cookbooks[run_list_entry]
+          desired_versions[run_list_entry] = cookbooks[run_list_entry].keys
+        end
+      end
+
+      # Filter by environment constraints
+      name = rest_path[-2]
+      environment = JSON.parse(environments[name], :create_additions => false)
+      constraints = environment['cookbook_versions']
+
+      desired_versions.each_key do |name|
+        desired_versions = filter_by_constraint(desired_versions, name, constraints[name])
+      end
+
+      # Depsolve!
+      solved = depsolve(desired_versions.keys, desired_versions, constraints)
+      if !solved
+        return error(400, "Unsolvable versions!")
+      end
+
+      result = {}
+      solved.each_pair do |name, versions|
+        result[name] = versions[0]
+      end
+      json_response(200, result)
+    end
+
+    def depsolve(unsolved, desired_versions, environment_constraints)
+      return nil if desired_versions.values.any? { |versions| versions.empty? }
+
+      # If everything is already
+      solve_for = unsolved[0]
+      return desired_versions if !solve_for
+
+      # Go through each desired version of this cookbook, starting with the latest,
+      # until we find one we can solve successfully with
+      sort_versions(desired_versions[solve_for]).each do |desired_version|
+        new_desired_versions = desired_versions.clone
+        new_desired_versions[solve_for] = [ desired_version ]
+        new_unsolved = unsolved[1..-1]
+
+        # Pick this cookbook, and add dependencies
+        cookbook_obj = JSON.parse(cookbooks[solve_for][desired_version], :create_additions => false)
+        cookbook_obj['metadata']['dependencies'].each_pair do |dep_name, dep_constraint|
+          # If the dep is not already in the list, add it to the list to solve
+          # and bring in all environment-allowed cookbook versions to desired_versions
+          if !new_desired_versions.has_key?(dep_name)
+            new_unsolved = new_unsolved + [dep_name]
+            new_desired_versions[dep_name] = cookbooks[dep_name].keys
+            new_desired_versions = filter_by_constraint(new_desired_versions, dep_name, environment_constraints[dep_name])
+          end
+          new_desired_versions = filter_by_constraint(new_desired_versions, dep_name, dep_constraint)
+        end
+
+        # Depsolve children with this desired version!  First solution wins.
+        result = depsolve(new_unsolved, new_desired_versions, environment_constraints)
+        return result if result
+      end
+      return nil
+    end
+
+    def sort_versions(versions)
+      result = versions.sort_by { |version| Chef::Version.new(version) }
+      result.reverse
+    end
+
+    def filter_by_constraint(versions, cookbook_name, constraint)
+      return versions if !constraint
+      constraint = Chef::VersionConstraint.new(constraint)
+      new_versions = versions[cookbook_name]
+      new_versions = new_versions.select { |version| constraint.include?(version) }
+      result = versions.clone
+      result[cookbook_name] = new_versions
+      result
     end
   end
 end
