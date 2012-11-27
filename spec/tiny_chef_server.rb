@@ -82,7 +82,7 @@ EOM
 
         [ '/file_store/*', FileStoreFileEndpoint.new(data) ],
       ])
-      router.not_found = NotFoundEndpoint.new(data)
+      router.not_found = NotFoundEndpoint.new
       router
     end
   end
