@@ -115,6 +115,26 @@ EOM
     end
   end
 
+  class RestRequest
+    def initialize(env)
+      @env = env
+    end
+
+    attr_reader :env
+
+    def base_uri
+      @base_uri ||= "#{env['rack.url_scheme']}://#{env['HTTP_HOST']}#{env['SCRIPT_NAME']}"
+    end
+
+    def rest_path
+      @rest_path ||= env['PATH_INFO'].split('/').select { |part| part != "" }
+    end
+
+    def body
+      @body ||= env['rack.input'].read
+    end
+  end
+
   class RestBase
     def initialize(data)
       @data = data
@@ -130,10 +150,8 @@ EOM
           return error(400, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}")
         end
         # Dispatch to get()/post()/put()/delete()
-        base_uri = "#{env['rack.url_scheme']}://#{env['HTTP_HOST']}#{env['SCRIPT_NAME']}"
-        body_io = env['rack.input']
         begin
-          self.send(method, rest_path, base_uri, body_io)
+          self.send(method, RestRequest.new(env))
         rescue RestErrorResponse => e
           error(e.response_code, e.error)
         end
@@ -144,12 +162,13 @@ EOM
       end
     end
 
-    def get_data(rest_path, base_uri)
+    def get_data(request, rest_path=nil)
+      rest_path ||= request.rest_path
       # Grab the value we're looking for
       value = data
       rest_path.each do |path_part|
         if !value.has_key?(path_part)
-          raise RestErrorResponse(404, "Object not found: #{build_uri(base_uri, rest_path)}")
+          raise RestErrorResponse(404, "Object not found: #{build_uri(request.base_uri, rest_path)}")
         end
         value = value[path_part]
       end
@@ -158,10 +177,6 @@ EOM
 
     def error(response_code, error)
       json_response(response_code, {"error" => error})
-    end
-
-    def not_found_error(rest_path, base_uri)
-      error(404, "Object not found: #{build_uri(base_uri, rest_path)}")
     end
 
     def json_response(response_code, json)
@@ -188,7 +203,7 @@ EOM
   end
 
   class NotFoundEndpoint
-    def call(env)
+    def call(request)
       return [404, {"Content-Type" => "application/json"}, "Object not found: #{env['REQUEST_PATH']}"]
     end
   end
@@ -202,42 +217,42 @@ EOM
 
     attr_reader :identity_key
 
-    def get(rest_path, base_uri, body_io)
+    def get(request)
       # Get the result
       result_hash = {}
-      get_data(rest_path, base_uri).keys.sort.each do |name|
-        result_hash[name] = "#{build_uri(base_uri, rest_path + [name])}"
+      get_data(request).keys.sort.each do |name|
+        result_hash[name] = "#{build_uri(request.base_uri, request.rest_path + [name])}"
       end
       json_response(200, result_hash)
     end
 
-    def post(rest_path, base_uri, body_io)
-      container = get_data(rest_path, base_uri)
-      contents = body_io.read
+    def post(request)
+      container = get_data(request)
+      contents = request.body
       name = JSON.parse(contents, :create_additions => false)[identity_key]
       if container[name]
         error(409, "Object already exists")
       else
         container[name] = contents
-        json_response(201, {"uri" => "#{build_uri(base_uri, rest_path + [name])}"})
+        json_response(201, {"uri" => "#{build_uri(request.base_uri, request.rest_path + [name])}"})
       end
     end
   end
 
   # Typical REST leaf endpoint (/roles/NAME or /data/BAG/NAME)
   class RestObjectEndpoint < RestBase
-    def get(rest_path, base_uri, body_io)
-      already_json_response(200, get_data(rest_path, base_uri))
+    def get(request)
+      already_json_response(200, get_data(request))
     end
-    def put(rest_path, base_uri, body_io)
+    def put(request)
       # We grab the old body to trigger a 404 if it doesn't exist
-      old_body = get_data(rest_path, base_uri)
-      get_data(rest_path[0..-2])[rest_path[-1]] = body_io.read
-      already_json_response(200, get_data(rest_path))
+      old_body = get_data(request)
+      get_data(request, request.rest_path[0..-2])[request.rest_path[-1]] = request.body
+      already_json_response(200, request.body)
     end
-    def delete(rest_path, base_uri, body_io)
-      key = rest_path[-1]
-      container = get_data(rest_path[0..-2], base_uri)
+    def delete(request)
+      key = request.rest_path[-1]
+      container = get_data(request, request.rest_path[0..-2])
       result = container[key]
       container.delete(key)
       already_json_response(200, result)
@@ -246,8 +261,8 @@ EOM
 
   # /clients
   class ClientsEndpoint < RestListEndpoint
-    def post(rest_path, base_uri, body_io)
-      result = super(rest_path, base_uri, body_io)
+    def post(request)
+      result = super(request)
       if result[0] == 201
         uri = JSON.parse(result[2], :create_additions => false)["uri"]
         json_response(201, {
@@ -260,26 +275,33 @@ EOM
 
   # /data
   class DataBagsEndpoint < RestListEndpoint
-    def post(rest_path, base_uri, body_io)
-      container = get_data(rest_path, base_uri)
-      contents = body_io.read
+    def post(request)
+      container = get_data(request)
+      contents = request.body
       name = JSON.parse(contents, :create_additions => false)[identity_key]
       if container[name]
         error(409, "Object already exists")
       else
         container[name] = {}
-        json_response(201, {"uri" => "#{build_uri(base_uri, rest_path + [name])}"})
+        json_response(201, {"uri" => "#{build_uri(request.base_uri, request.rest_path + [name])}"})
       end
     end
   end
 
   # /environments/NAME
   class EnvironmentEndpoint < RestObjectEndpoint
-    def delete(rest_path, base_uri, body_io)
-      if rest_path[-1] == "_default"
+    def delete(request)
+      if request.rest_path[1] == "_default"
         error(403, "_default environment cannot be modified")
       else
-        super(rest_path, base_uri, body_io)
+        super(request)
+      end
+    end
+    def put(request)
+      if request.rest_path[1] == "_default"
+        error(403, "_default environment cannot be modified")
+      else
+        super(request)
       end
     end
   end
@@ -291,10 +313,10 @@ EOM
       @next_id = 1
     end
 
-    def post(rest_path, base_uri, body_io)
+    def post(request)
       sandbox_checksums = []
 
-      needed_checksums = JSON.parse(body_io.read, :create_additions => false)['checksums']
+      needed_checksums = JSON.parse(request.body, :create_additions => false)['checksums']
       result_checksums = {}
       needed_checksums.keys.each do |needed_checksum|
         if data['file_store'].has_key?(needed_checksum)
@@ -302,7 +324,7 @@ EOM
         else
           result_checksums[needed_checksum] = {
             :needs_upload => true,
-            :url => build_uri(base_uri, ['file_store', needed_checksum])
+            :url => build_uri(request.base_uri, ['file_store', needed_checksum])
           }
           sandbox_checksums << needed_checksum
         end
@@ -314,7 +336,7 @@ EOM
       data['sandboxes'][id] = sandbox_checksums
 
       json_response(201, {
-        :uri => build_uri(base_uri, rest_path + [id.to_s]),
+        :uri => build_uri(request.base_uri, request.rest_path + [id.to_s]),
         :checksums => result_checksums,
         :sandbox_id => id
       })
@@ -323,28 +345,28 @@ EOM
 
   # /sandboxes/ID
   class SandboxEndpoint < RestBase
-    def put(rest_path, base_uri, body_io)
-      data['sandboxes'].delete(rest_path[-1])
-      json_response(200, { :sandbox_id => rest_path[-1]})
+    def put(request)
+      data['sandboxes'].delete(request.rest_path[1])
+      json_response(200, { :sandbox_id => request.rest_path[1]})
     end
   end
 
   # The minimum amount of S3 necessary to support cookbook upload/download
   # /file_store/FILE
   class FileStoreFileEndpoint < RestBase
-    def get(rest_path, base_uri, body_io)
-      [200, {"Content-Type" => 'application/x-binary'}, get_data(rest_path, base_uri) ]
+    def get(request)
+      [200, {"Content-Type" => 'application/x-binary'}, get_data(request) ]
     end
 
-    def put(rest_path, base_uri, body_io)
-      data['file_store'][rest_path[-1]] = body_io.read
+    def put(request)
+      data['file_store'][request.rest_path[1]] = request.body
       json_response(200, {})
     end
   end
 
   # Common code for endpoints that return cookbook lists
   class CookbooksBase < RestBase
-    def format_cookbooks_list(rest_path, base_uri, cookbooks_list, constraints = {})
+    def format_cookbooks_list(request, cookbooks_list, constraints = {})
       results = {}
       cookbooks_list.keys.sort.each do |name|
         constraint = Chef::VersionConstraint.new(constraints[name])
@@ -352,14 +374,14 @@ EOM
         cookbooks_list[name].keys.sort.each do |version|
           if constraint.include?(version)
             versions[version] = {
-              'url' => build_uri(base_uri, rest_path + [name, version]),
+              'url' => build_uri(request.base_uri, ['cookbooks', name, version]),
               'version' => version
             }
           end
         end
         if versions.size > 0
           results[name] = {
-            'url' => build_uri(base_uri, rest_path + [name]),
+            'url' => build_uri(request.base_uri, ['cookbooks', name]),
             'versions' => versions
           }
         end
@@ -370,41 +392,41 @@ EOM
 
   # /cookbooks
   class CookbooksEndpoint < CookbooksBase
-    def get(rest_path, base_uri, body_io)
-      json_response(200, format_cookbooks_list(rest_path, base_uri, data['cookbooks']))
+    def get(request)
+      json_response(200, format_cookbooks_list(request, data['cookbooks']))
     end
   end
 
   # /cookbooks/NAME
   class CookbookEndpoint < CookbooksBase
-    def get(rest_path, base_uri, body_io)
-      name = rest_path[1]
-      json_response(200, format_cookbooks_list(rest_path, base_uri, { name => data['cookbooks'][name] }))
+    def get(request)
+      name = request.rest_path[1]
+      json_response(200, format_cookbooks_list(request, { name => data['cookbooks'][name] }))
     end
   end
 
   # /cookbooks/NAME/VERSION
   class CookbookVersionEndpoint < RestObjectEndpoint
-    def get(rest_path, base_uri, body_io)
-      if rest_path[2] == "_latest"
-        sorted_versions = data['cookbooks'][rest_path[1]].keys.sort_by { |version| Chef::Version.new(version) }
-        rest_path[2] = sorted_versions[-1]
+    def get(request)
+      if request.rest_path[2] == "_latest"
+        sorted_versions = data['cookbooks'][request.rest_path[1]].keys.sort_by { |version| Chef::Version.new(version) }
+        request.rest_path[2] = sorted_versions[-1]
       end
-      super(rest_path, base_uri, body_io)
+      super(request)
     end
 
-    def put(rest_path, base_uri, body_io)
-      name = rest_path[1]
-      version = rest_path[2]
+    def put(request)
+      name = request.rest_path[1]
+      version = request.rest_path[2]
       data['cookbooks'][name] = {} if !data['cookbooks'][name]
       response_code = data['cookbooks'][name][version] ? 200 : 201
-      data['cookbooks'][name][version] = body_io.read
+      data['cookbooks'][name][version] = request.body
       already_json_response(response_code, data['cookbooks'][name][version])
     end
 
-    def delete(rest_path, base_uri, body_io)
-      response = super(rest_path, base_uri, body_io)
-      cookbook_name = rest_path[1]
+    def delete(request)
+      response = super(request)
+      cookbook_name = request.rest_path[1]
       data['cookbooks'].delete(cookbook_name) if data['cookbooks'][cookbook_name].size == 0
       response
     end
@@ -412,20 +434,20 @@ EOM
 
   # /environments/NAME/cookbooks
   class EnvironmentCookbooksEndpoint < CookbooksBase
-    def get(rest_path, base_uri, body_io)
-      environment = JSON.parse(get_data(rest_path[0..1], base_uri), :create_additions => false)
+    def get(request)
+      environment = JSON.parse(get_data(request, request.rest_path[0..1]), :create_additions => false)
       constraints = environment['cookbook_versions']
-      json_response(200, format_cookbooks_list(rest_path[0..1], base_uri, data['cookbooks'], constraints))
+      json_response(200, format_cookbooks_list(request, data['cookbooks'], constraints))
     end
   end
 
   # /environments/NAME/cookbooks/NAME
   class EnvironmentCookbookEndpoint < CookbooksBase
-    def get(rest_path, base_uri, body_io)
-      cookbook_name = rest_path[-1]
-      environment = JSON.parse(get_data(rest_path[0..1], base_uri), :create_additions => false)
+    def get(request)
+      cookbook_name = request.rest_path[3]
+      environment = JSON.parse(get_data(request, request.rest_path[0..1]), :create_additions => false)
       constraints = environment['cookbook_versions']
-      json_response(200, format_cookbooks_list(rest_path[0..1], base_uri, { cookbook_name => data['cookbooks'][cookbook_name] }, constraints))
+      json_response(200, format_cookbooks_list(request, { cookbook_name => data['cookbooks'][cookbook_name] }, constraints))
     end
   end
 
@@ -439,10 +461,10 @@ EOM
       data['environments']
     end
 
-    def post(rest_path, base_uri, body_io)
+    def post(request)
       # Get the list of cookbooks and versions desired by the runlist
       desired_versions = {}
-      run_list = JSON.parse(body_io.read, :create_additions => false)['run_list']
+      run_list = JSON.parse(request.body, :create_additions => false)['run_list']
       run_list.each do |run_list_entry|
         if run_list_entry =~ /(.+)\@(.+)/
           error(400, "No such cookbook: #{$1}") if !cookbooks[$1]
@@ -455,16 +477,16 @@ EOM
       end
 
       # Filter by environment constraints
-      name = rest_path[-2]
-      environment = JSON.parse(environments[name], :create_additions => false)
-      constraints = environment['cookbook_versions']
+      environment_name = request.rest_path[1]
+      environment = JSON.parse(environments[environment_name], :create_additions => false)
+      environment_constraints = environment['cookbook_versions']
 
       desired_versions.each_key do |name|
-        desired_versions = filter_by_constraint(desired_versions, name, constraints[name])
+        desired_versions = filter_by_constraint(desired_versions, name, environment_constraints[name])
       end
 
       # Depsolve!
-      solved = depsolve(desired_versions.keys, desired_versions, constraints)
+      solved = depsolve(desired_versions.keys, desired_versions, environment_constraints)
       if !solved
         return error(400, "Unsolvable versions!")
       end
