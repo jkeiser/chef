@@ -20,6 +20,7 @@ require 'rubygems'
 require 'webrick'
 require 'rack'
 require 'json'
+require 'chef/exceptions'
 require 'chef/version_class'
 require 'chef/version_constraint'
 
