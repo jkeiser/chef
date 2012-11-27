@@ -28,11 +28,11 @@ class TinyChefServer < Rack::Server
     options[:host] ||= "localhost" # TODO 0.0.0.0?
     options[:port] ||= 80
     super(options)
-    @data = _data = {
-      :clients => {},
-      :cookbooks => {},
-      :data => {},
-      :environments => {
+    @data = {
+      'clients' => {},
+      'cookbooks' => {},
+      'data' => {},
+      'environments' => {
         "_default" => <<EOM
 {
   "name": "_default",
@@ -48,40 +48,95 @@ class TinyChefServer < Rack::Server
 }
 EOM
       },
-      :file_store => {},
-      :nodes => {},
-      :roles => {},
-      :sandboxes => {}
+      'file_store' => {},
+      'nodes' => {},
+      'roles' => {},
+      'sandboxes' => {}
     }
-
-    @app = TopLevelEndpoint.new(self)
   end
 
   attr_reader :data
-  attr_reader :app
+
+  def app
+    @app ||= begin
+      router = Router.new([
+        [ '/clients', ClientsEndpoint.new(data) ],
+        [ '/clients/*', RestObjectEndpoint.new(data) ],
+        [ '/cookbooks', CookbooksEndpoint.new(data) ],
+        [ '/cookbooks/*', CookbookEndpoint.new(data) ],
+        [ '/cookbooks/*/*', CookbookVersionEndpoint.new(data) ],
+        [ '/data', DataBagsEndpoint.new(data) ],
+        [ '/data/*', RestListEndpoint.new(data, 'id') ],
+        [ '/data/*/*', RestObjectEndpoint.new(data) ],
+        [ '/environments', RestListEndpoint.new(data) ],
+        [ '/environments/*', EnvironmentEndpoint.new(data) ],
+        [ '/environments/*/cookbooks', EnvironmentCookbooksEndpoint.new(data) ],
+        [ '/environments/*/cookbooks/*', EnvironmentCookbookEndpoint.new(data) ],
+        [ '/environments/*/cookbook_versions', EnvironmentCookbookVersionsEndpoint.new(data) ],
+        [ '/nodes', RestListEndpoint.new(data) ],
+        [ '/nodes/*', RestObjectEndpoint.new(data) ],
+        [ '/roles', RestListEndpoint.new(data) ],
+        [ '/roles/*', RestObjectEndpoint.new(data) ],
+        [ '/sandboxes', SandboxesEndpoint.new(data) ],
+        [ '/sandboxes/*', SandboxEndpoint.new(data) ],
+
+        [ '/file_store/*', FileStoreFileEndpoint.new(data) ],
+      ])
+      router.not_found = NotFoundEndpoint.new(data)
+      router
+    end
+  end
+
+  PUBLIC_KEY = "-----BEGIN CERTIFICATE-----\nMIIDMzCCApygAwIBAgIBATANBgkqhkiG9w0BAQUFADCBnjELMAkGA1UEBhMCVVMx\nEzARBgNVBAgMCldhc2hpbmd0b24xEDAOBgNVBAcMB1NlYXR0bGUxFjAUBgNVBAoM\nDU9wc2NvZGUsIEluYy4xHDAaBgNVBAsME0NlcnRpZmljYXRlIFNlcnZpY2UxMjAw\nBgNVBAMMKW9wc2NvZGUuY29tL2VtYWlsQWRkcmVzcz1hdXRoQG9wc2NvZGUuY29t\nMB4XDTEyMTEyMTAwMzQyMVoXDTIyMTExOTAwMzQyMVowgZsxEDAOBgNVBAcTB1Nl\nYXR0bGUxEzARBgNVBAgTCldhc2hpbmd0b24xCzAJBgNVBAYTAlVTMRwwGgYDVQQL\nExNDZXJ0aWZpY2F0ZSBTZXJ2aWNlMRYwFAYDVQQKEw1PcHNjb2RlLCBJbmMuMS8w\nLQYDVQQDFCZVUkk6aHR0cDovL29wc2NvZGUuY29tL0dVSURTL3VzZXJfZ3VpZDCC\nASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANLDmPbR71bS2esZlZh/HfC6\n0azXFjl2677wq2ovk9xrUb0Ui4ZLC66TqQ9C/RBzOjXU4TRf3hgPTqvlCgHusl0d\nIcLCrsSl6kPEhJpYWWfRoroIAwf82A9yLQekhqXZEXu5EKkwoUMqyF6m0ZCasaE1\ny8niQxdLAsk3ady/CGQlFqHTPKFfU5UASR2LRtYC1MCIvJHDFRKAp9kPJbQo9P37\nZ8IU7cDudkZFgNLmDixlWsh7C0ghX8fgAlj1P6FgsFufygam973k79GhIP54dELB\nc0S6E8ekkRSOXU9jX/IoiXuFglBvFihAdhvED58bMXzj2AwXUyeAlxItnvs+NVUC\nAwEAATANBgkqhkiG9w0BAQUFAAOBgQBkFZRbMoywK3hb0/X7MXmPYa7nlfnd5UXq\nr2n32ettzZNmEPaI2d1j+//nL5qqhOlrWPS88eKEPnBOX/jZpUWOuAAddnrvFzgw\nrp/C2H7oMT+29F+5ezeViLKbzoFYb4yECHBoi66IFXNae13yj7taMboBeUmE664G\nTB/MZpRr8g==\n-----END CERTIFICATE-----\n"
+  PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0sOY9tHvVtLZ6xmVmH8d8LrRrNcWOXbrvvCrai+T3GtRvRSL\nhksLrpOpD0L9EHM6NdThNF/eGA9Oq+UKAe6yXR0hwsKuxKXqQ8SEmlhZZ9GiuggD\nB/zYD3ItB6SGpdkRe7kQqTChQyrIXqbRkJqxoTXLyeJDF0sCyTdp3L8IZCUWodM8\noV9TlQBJHYtG1gLUwIi8kcMVEoCn2Q8ltCj0/ftnwhTtwO52RkWA0uYOLGVayHsL\nSCFfx+ACWPU/oWCwW5/KBqb3veTv0aEg/nh0QsFzRLoTx6SRFI5dT2Nf8iiJe4WC\nUG8WKEB2G8QPnxsxfOPYDBdTJ4CXEi2e+z41VQIDAQABAoIBAALhqbW2KQ+G0nPk\nZacwFbi01SkHx8YBWjfCEpXhEKRy0ytCnKW5YO+CFU2gHNWcva7+uhV9OgwaKXkw\nKHLeUJH1VADVqI4Htqw2g5mYm6BPvWnNsjzpuAp+BR+VoEGkNhj67r9hatMAQr0I\nitTvSH5rvd2EumYXIHKfz1K1SegUk1u1EL1RcMzRmZe4gDb6eNBs9Sg4im4ybTG6\npPIytA8vBQVWhjuAR2Tm+wZHiy0Az6Vu7c2mS07FSX6FO4E8SxWf8idaK9ijMGSq\nFvIS04mrY6XCPUPUC4qm1qNnhDPpOr7CpI2OO98SqGanStS5NFlSFXeXPpM280/u\nfZUA0AECgYEA+x7QUnffDrt7LK2cX6wbvn4mRnFxet7bJjrfWIHf+Rm0URikaNma\nh0/wNKpKBwIH+eHK/LslgzcplrqPytGGHLOG97Gyo5tGAzyLHUWBmsNkRksY2sPL\nuHq6pYWJNkqhnWGnIbmqCr0EWih82x/y4qxbJYpYqXMrit0wVf7yAgkCgYEA1twI\ngFaXqesetTPoEHSQSgC8S4D5/NkdriUXCYb06REcvo9IpFMuiOkVUYNN5d3MDNTP\nIdBicfmvfNELvBtXDomEUD8ls1UuoTIXRNGZ0VsZXu7OErXCK0JKNNyqRmOwcvYL\nJRqLfnlei5Ndo1lu286yL74c5rdTLs/nI2p4e+0CgYB079ZmcLeILrmfBoFI8+Y/\ngJLmPrFvXBOE6+lRV7kqUFPtZ6I3yQzyccETZTDvrnx0WjaiFavUPH27WMjY01S2\nTMtO0Iq1MPsbSrglO1as8MvjB9ldFcvp7gy4Q0Sv6XT0yqJ/S+vo8Df0m+H4UBpU\nf5o6EwBSd/UQxwtZIE0lsQKBgQCswfjX8Eg8KL/lJNpIOOE3j4XXE9ptksmJl2sB\njxDnQYoiMqVO808saHVquC/vTrpd6tKtNpehWwjeTFuqITWLi8jmmQ+gNTKsC9Gn\n1Pxf2Gb67PqnEpwQGln+TRtgQ5HBrdHiQIi+5am+gnw89pDrjjO5rZwhanAo6KPJ\n1zcPNQKBgQDxFu8v4frDmRNCVaZS4f1B6wTrcMrnibIDlnzrK9GG6Hz1U7dDv8s8\nNf4UmeMzDXjlPWZVOvS5+9HKJPdPj7/onv8B2m18+lcgTTDJBkza7R1mjL1Cje/Z\nKcVGsryKN6cjE7yCDasnA7R2rVBV/7NWeJV77bmzT5O//rW4yIfUIg==\n-----END RSA PRIVATE KEY-----\n"
 
   private
 
+  class Router
+    def initialize(routes)
+      @routes = routes.map do |route, endpoint|
+        pattern = Regexp.new("^#{route.gsub('*', '[^/]*')}$")
+        [ pattern, endpoint ]
+      end
+    end
+
+    attr_reader :routes
+    attr_accessor :not_found
+
+    def call(env)
+      puts "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+      clean_path = "/" + env['PATH_INFO'].split('/').select { |part| part != "" }.join("/")
+      routes.each do |route, endpoint|
+        if route.match(clean_path)
+          return endpoint.call(env)
+        end
+      end
+      not_found.call(env)
+    end
+  end
+
   class RestBase
+    def initialize(data)
+      @data = data
+    end
+
+    attr_reader :data
+
     def call(env)
       begin
-        puts "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
         rest_path = env['PATH_INFO'].split('/').select { |part| part != "" }
-        handler = self
-        rest_path.each do |rest_path_part|
-          handler = handler.child(rest_path_part)
-          if handler.nil?
-            return error(404, "Object not found: #{env['REQUEST_PATH']}")
-          end
-        end
         method = env['REQUEST_METHOD'].downcase.to_sym
-        if !handler.respond_to?(method)
+        if !self.respond_to?(method)
           return error(400, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}")
         end
         # Dispatch to get()/post()/put()/delete()
         base_uri = "#{env['rack.url_scheme']}://#{env['HTTP_HOST']}#{env['SCRIPT_NAME']}"
         body_io = env['rack.input']
-        handler.send(method, rest_path, base_uri, body_io)
+        begin
+          self.send(method, rest_path, base_uri, body_io)
+        rescue RestErrorResponse => e
+          error(e.response_code, e.error)
+        end
       rescue
         puts $!.inspect
         puts $!.backtrace
@@ -89,8 +144,24 @@ EOM
       end
     end
 
+    def get_data(rest_path, base_uri)
+      # Grab the value we're looking for
+      value = data
+      rest_path.each do |path_part|
+        if !value.has_key?(path_part)
+          raise RestErrorResponse(404, "Object not found: #{build_uri(base_uri, rest_path)}")
+        end
+        value = value[path_part]
+      end
+      value
+    end
+
     def error(response_code, error)
       json_response(response_code, {"error" => error})
+    end
+
+    def not_found_error(rest_path, base_uri)
+      error(404, "Object not found: #{build_uri(base_uri, rest_path)}")
     end
 
     def json_response(response_code, json)
@@ -104,94 +175,77 @@ EOM
     def build_uri(base_uri, rest_path)
       "#{base_uri}/#{rest_path.join('/')}"
     end
+  end
 
-    def child(name)
-      nil
+  class RestErrorResponse
+    def initialize(response_code, error)
+      @response_code = response_code
+      @error = error
+    end
+
+    attr_reader :response_code
+    attr_reader :error
+  end
+
+  class NotFoundEndpoint
+    def call(env)
+      return [404, {"Content-Type" => "application/json"}, "Object not found: #{env['REQUEST_PATH']}"]
     end
   end
 
-  class TopLevelEndpoint < RestBase
-    def initialize(server)
-      @server = server
-      @children = {
-        'clients' => ClientsEndpoint.new(server.data[:clients], 'name'),
-        'cookbooks' => CookbooksEndpoint.new(server.data[:cookbooks]),
-        'data' => DataBagsEndpoint.new(server.data[:data], 'name'),
-        'environments' => EnvironmentsEndpoint.new(server.data[:environments], 'name', server.data[:cookbooks]),
-        'nodes' => RestListEndpoint.new(server.data[:nodes], 'name'),
-        'roles' => RestListEndpoint.new(server.data[:roles], 'name'),
-        'sandboxes' => SandboxesEndpoint.new(server.data[:file_store], server.data[:sandboxes]),
-
-        # This endpoint does not exist in the real world.
-        'file_store' => FileStoreEndpoint.new(server.data[:file_store])
-      }
-    end
-    def child(name)
-      @children[name]
-    end
-  end
-
+  # Typical REST list endpoint (/roles or /data/BAG)
   class RestListEndpoint < RestBase
-    def initialize(hash, identity_key)
-      @hash = hash
+    def initialize(data, identity_key = 'name')
+      super(data)
       @identity_key = identity_key
     end
 
-    attr_reader :hash
     attr_reader :identity_key
 
     def get(rest_path, base_uri, body_io)
+      # Get the result
       result_hash = {}
-      hash.keys.sort.each do |name|
+      get_data(rest_path, base_uri).keys.sort.each do |name|
         result_hash[name] = "#{build_uri(base_uri, rest_path + [name])}"
       end
       json_response(200, result_hash)
     end
 
     def post(rest_path, base_uri, body_io)
+      container = get_data(rest_path, base_uri)
       contents = body_io.read
       name = JSON.parse(contents, :create_additions => false)[identity_key]
-      if hash[name]
+      if container[name]
         error(409, "Object already exists")
       else
-        hash[name] = contents
+        container[name] = contents
         json_response(201, {"uri" => "#{build_uri(base_uri, rest_path + [name])}"})
       end
     end
-
-    def child(name)
-      return nil if !hash[name]
-      @child_endpoint ||= RestObjectEndpoint.new(hash)
-    end
   end
 
+  # Typical REST leaf endpoint (/roles/NAME or /data/BAG/NAME)
   class RestObjectEndpoint < RestBase
-    def initialize(parent_hash)
-      @parent_hash = parent_hash
-    end
-
-    attr_reader :parent_hash
-
     def get(rest_path, base_uri, body_io)
-      key = rest_path[-1]
-      already_json_response(200, parent_hash[key])
+      already_json_response(200, get_data(rest_path, base_uri))
     end
     def put(rest_path, base_uri, body_io)
-      key = rest_path[-1]
-      parent_hash[key] = body_io.read
-      already_json_response(200, parent_hash[key])
+      # We grab the old body to trigger a 404 if it doesn't exist
+      old_body = get_data(rest_path, base_uri)
+      get_data(rest_path[0..-2])[rest_path[-1]] = body_io.read
+      already_json_response(200, get_data(rest_path))
     end
     def delete(rest_path, base_uri, body_io)
       key = rest_path[-1]
-      result = parent_hash[key]
-      parent_hash.delete(key)
+      container = get_data(rest_path[0..-2], base_uri)
+      result = container[key]
+      container.delete(key)
       already_json_response(200, result)
     end
   end
 
+  # /clients
   class ClientsEndpoint < RestListEndpoint
-    PUBLIC_KEY = "-----BEGIN CERTIFICATE-----\nMIIDMzCCApygAwIBAgIBATANBgkqhkiG9w0BAQUFADCBnjELMAkGA1UEBhMCVVMx\nEzARBgNVBAgMCldhc2hpbmd0b24xEDAOBgNVBAcMB1NlYXR0bGUxFjAUBgNVBAoM\nDU9wc2NvZGUsIEluYy4xHDAaBgNVBAsME0NlcnRpZmljYXRlIFNlcnZpY2UxMjAw\nBgNVBAMMKW9wc2NvZGUuY29tL2VtYWlsQWRkcmVzcz1hdXRoQG9wc2NvZGUuY29t\nMB4XDTEyMTEyMTAwMzQyMVoXDTIyMTExOTAwMzQyMVowgZsxEDAOBgNVBAcTB1Nl\nYXR0bGUxEzARBgNVBAgTCldhc2hpbmd0b24xCzAJBgNVBAYTAlVTMRwwGgYDVQQL\nExNDZXJ0aWZpY2F0ZSBTZXJ2aWNlMRYwFAYDVQQKEw1PcHNjb2RlLCBJbmMuMS8w\nLQYDVQQDFCZVUkk6aHR0cDovL29wc2NvZGUuY29tL0dVSURTL3VzZXJfZ3VpZDCC\nASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANLDmPbR71bS2esZlZh/HfC6\n0azXFjl2677wq2ovk9xrUb0Ui4ZLC66TqQ9C/RBzOjXU4TRf3hgPTqvlCgHusl0d\nIcLCrsSl6kPEhJpYWWfRoroIAwf82A9yLQekhqXZEXu5EKkwoUMqyF6m0ZCasaE1\ny8niQxdLAsk3ady/CGQlFqHTPKFfU5UASR2LRtYC1MCIvJHDFRKAp9kPJbQo9P37\nZ8IU7cDudkZFgNLmDixlWsh7C0ghX8fgAlj1P6FgsFufygam973k79GhIP54dELB\nc0S6E8ekkRSOXU9jX/IoiXuFglBvFihAdhvED58bMXzj2AwXUyeAlxItnvs+NVUC\nAwEAATANBgkqhkiG9w0BAQUFAAOBgQBkFZRbMoywK3hb0/X7MXmPYa7nlfnd5UXq\nr2n32ettzZNmEPaI2d1j+//nL5qqhOlrWPS88eKEPnBOX/jZpUWOuAAddnrvFzgw\nrp/C2H7oMT+29F+5ezeViLKbzoFYb4yECHBoi66IFXNae13yj7taMboBeUmE664G\nTB/MZpRr8g==\n-----END CERTIFICATE-----\n"
-    PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0sOY9tHvVtLZ6xmVmH8d8LrRrNcWOXbrvvCrai+T3GtRvRSL\nhksLrpOpD0L9EHM6NdThNF/eGA9Oq+UKAe6yXR0hwsKuxKXqQ8SEmlhZZ9GiuggD\nB/zYD3ItB6SGpdkRe7kQqTChQyrIXqbRkJqxoTXLyeJDF0sCyTdp3L8IZCUWodM8\noV9TlQBJHYtG1gLUwIi8kcMVEoCn2Q8ltCj0/ftnwhTtwO52RkWA0uYOLGVayHsL\nSCFfx+ACWPU/oWCwW5/KBqb3veTv0aEg/nh0QsFzRLoTx6SRFI5dT2Nf8iiJe4WC\nUG8WKEB2G8QPnxsxfOPYDBdTJ4CXEi2e+z41VQIDAQABAoIBAALhqbW2KQ+G0nPk\nZacwFbi01SkHx8YBWjfCEpXhEKRy0ytCnKW5YO+CFU2gHNWcva7+uhV9OgwaKXkw\nKHLeUJH1VADVqI4Htqw2g5mYm6BPvWnNsjzpuAp+BR+VoEGkNhj67r9hatMAQr0I\nitTvSH5rvd2EumYXIHKfz1K1SegUk1u1EL1RcMzRmZe4gDb6eNBs9Sg4im4ybTG6\npPIytA8vBQVWhjuAR2Tm+wZHiy0Az6Vu7c2mS07FSX6FO4E8SxWf8idaK9ijMGSq\nFvIS04mrY6XCPUPUC4qm1qNnhDPpOr7CpI2OO98SqGanStS5NFlSFXeXPpM280/u\nfZUA0AECgYEA+x7QUnffDrt7LK2cX6wbvn4mRnFxet7bJjrfWIHf+Rm0URikaNma\nh0/wNKpKBwIH+eHK/LslgzcplrqPytGGHLOG97Gyo5tGAzyLHUWBmsNkRksY2sPL\nuHq6pYWJNkqhnWGnIbmqCr0EWih82x/y4qxbJYpYqXMrit0wVf7yAgkCgYEA1twI\ngFaXqesetTPoEHSQSgC8S4D5/NkdriUXCYb06REcvo9IpFMuiOkVUYNN5d3MDNTP\nIdBicfmvfNELvBtXDomEUD8ls1UuoTIXRNGZ0VsZXu7OErXCK0JKNNyqRmOwcvYL\nJRqLfnlei5Ndo1lu286yL74c5rdTLs/nI2p4e+0CgYB079ZmcLeILrmfBoFI8+Y/\ngJLmPrFvXBOE6+lRV7kqUFPtZ6I3yQzyccETZTDvrnx0WjaiFavUPH27WMjY01S2\nTMtO0Iq1MPsbSrglO1as8MvjB9ldFcvp7gy4Q0Sv6XT0yqJ/S+vo8Df0m+H4UBpU\nf5o6EwBSd/UQxwtZIE0lsQKBgQCswfjX8Eg8KL/lJNpIOOE3j4XXE9ptksmJl2sB\njxDnQYoiMqVO808saHVquC/vTrpd6tKtNpehWwjeTFuqITWLi8jmmQ+gNTKsC9Gn\n1Pxf2Gb67PqnEpwQGln+TRtgQ5HBrdHiQIi+5am+gnw89pDrjjO5rZwhanAo6KPJ\n1zcPNQKBgQDxFu8v4frDmRNCVaZS4f1B6wTrcMrnibIDlnzrK9GG6Hz1U7dDv8s8\nNf4UmeMzDXjlPWZVOvS5+9HKJPdPj7/onv8B2m18+lcgTTDJBkza7R1mjL1Cje/Z\nKcVGsryKN6cjE7yCDasnA7R2rVBV/7NWeJV77bmzT5O//rW4yIfUIg==\n-----END RSA PRIVATE KEY-----\n"
     def post(rest_path, base_uri, body_io)
       result = super(rest_path, base_uri, body_io)
       if result[0] == 201
@@ -204,28 +258,23 @@ EOM
     end
   end
 
-  class EnvironmentsEndpoint < RestListEndpoint
-    def initialize(hash, identity_key, cookbooks)
-      super(hash, identity_key)
-      @cookbooks = cookbooks
-    end
-
-    attr_reader :cookbooks
-
-    def child(name)
-      return nil if !hash[name]
-      @child_endpoint ||= EnvironmentEndpoint.new(hash, cookbooks)
+  # /data
+  class DataBagsEndpoint < RestListEndpoint
+    def post(rest_path, base_uri, body_io)
+      container = get_data(rest_path, base_uri)
+      contents = body_io.read
+      name = JSON.parse(contents, :create_additions => false)[identity_key]
+      if container[name]
+        error(409, "Object already exists")
+      else
+        container[name] = {}
+        json_response(201, {"uri" => "#{build_uri(base_uri, rest_path + [name])}"})
+      end
     end
   end
 
+  # /environments/NAME
   class EnvironmentEndpoint < RestObjectEndpoint
-    def initialize(parent_hash, cookbooks)
-      super(parent_hash)
-      @cookbooks = cookbooks
-    end
-
-    attr_reader :cookbooks
-
     def delete(rest_path, base_uri, body_io)
       if rest_path[-1] == "_default"
         error(403, "_default environment cannot be modified")
@@ -233,61 +282,14 @@ EOM
         super(rest_path, base_uri, body_io)
       end
     end
-
-    def child(name)
-      if name == 'cookbooks'
-        @cookbooks_endpoint ||= EnvironmentCookbooksEndpoint.new(parent_hash, cookbooks)
-      elsif name == 'cookbook_versions'
-        @cookbook_versions_endpoint ||= EnvironmentCookbookVersionsEndpoint.new(parent_hash, cookbooks)
-      else
-        nil
-      end
-    end
   end
 
-  class DataBagsEndpoint < RestListEndpoint
-    def child(name)
-      child_hash = hash[name]
-      return nil if !child_hash
-      DataBagEndpoint.new(hash, child_hash)
-    end
-
-    def post(rest_path, base_uri, body_io)
-      name = JSON.parse(body_io.read, :create_additions => false)[identity_key]
-      if hash[name]
-        error(409, "Object already exists")
-      else
-        hash[name] = {}
-        json_response(201, {"uri" => "#{build_uri(base_uri, rest_path + [name])}"})
-      end
-    end
-  end
-
-  class DataBagEndpoint < RestListEndpoint
-    def initialize(parent_hash, hash)
-      super(hash, 'id')
-      @parent_hash = parent_hash
-    end
-
-    attr_reader :parent_hash
-
-    def delete(rest_path, base_uri, body_io)
-      key = rest_path[-1]
-      result = parent_hash[key]
-      parent_hash.delete(key)
-      already_json_response(200, result)
-    end
-  end
-
+  # /sandboxes
   class SandboxesEndpoint < RestBase
-    def initialize(checksums, sandboxes)
-      @checksums = checksums
-      @sandboxes = sandboxes
+    def initialize(data)
+      super(data)
       @next_id = 1
     end
-
-    attr_reader :checksums
-    attr_reader :sandboxes
 
     def post(rest_path, base_uri, body_io)
       sandbox_checksums = []
@@ -295,7 +297,7 @@ EOM
       needed_checksums = JSON.parse(body_io.read, :create_additions => false)['checksums']
       result_checksums = {}
       needed_checksums.keys.each do |needed_checksum|
-        if checksums.has_key?(needed_checksum)
+        if data['file_store'].has_key?(needed_checksum)
           result_checksums[needed_checksum] = { :needs_upload => false }
         else
           result_checksums[needed_checksum] = {
@@ -309,7 +311,7 @@ EOM
       id = @next_id.to_s
       @next_id+=1
 
-      sandboxes[id] = sandbox_checksums
+      data['sandboxes'][id] = sandbox_checksums
 
       json_response(201, {
         :uri => build_uri(base_uri, rest_path + [id.to_s]),
@@ -317,70 +319,31 @@ EOM
         :sandbox_id => id
       })
     end
-
-    def child(name)
-      if sandboxes[name]
-        @child_endpoint ||= SandboxEndpoint.new(checksums, sandboxes)
-      end
-    end
   end
 
+  # /sandboxes/ID
   class SandboxEndpoint < RestBase
-    def initialize(checksums, sandboxes)
-      @checksums = checksums
-      @sandboxes = sandboxes
-    end
-
-    attr_reader :checksums
-    attr_reader :sandboxes
-
     def put(rest_path, base_uri, body_io)
-      sandboxes.delete(rest_path[-1])
+      data['sandboxes'].delete(rest_path[-1])
       json_response(200, { :sandbox_id => rest_path[-1]})
     end
   end
 
-  class FileStoreEndpoint < RestBase
-    def initialize(file_store)
-      @file_store = file_store
-    end
-
-    attr_reader :file_store
-
-    def child(name)
-      @child_endpoint ||= FileStoreFileEndpoint.new(file_store)
-    end
-  end
-
+  # The minimum amount of S3 necessary to support cookbook upload/download
+  # /file_store/FILE
   class FileStoreFileEndpoint < RestBase
-    def initialize(file_store)
-      @file_store = file_store
-    end
-
-    attr_reader :file_store
-
     def get(rest_path, base_uri, body_io)
-      filename = rest_path[-1]
-      if file_store[filename]
-        [200, {"Content-Type" => 'application/x-binary'}, file_store[filename] ]
-      else
-        error(404, "File not found: '#{filename}'")
-      end
+      [200, {"Content-Type" => 'application/x-binary'}, get_data(rest_path, base_uri) ]
     end
 
     def put(rest_path, base_uri, body_io)
-      file_store[rest_path[-1]] = body_io.read
+      data['file_store'][rest_path[-1]] = body_io.read
       json_response(200, {})
     end
   end
 
+  # Common code for endpoints that return cookbook lists
   class CookbooksBase < RestBase
-    def initialize(cookbooks)
-      @cookbooks = cookbooks
-    end
-
-    attr_reader :cookbooks
-
     def format_cookbooks_list(rest_path, base_uri, cookbooks_list, constraints = {})
       results = {}
       cookbooks_list.keys.sort.each do |name|
@@ -405,110 +368,76 @@ EOM
     end
   end
 
+  # /cookbooks
   class CookbooksEndpoint < CookbooksBase
     def get(rest_path, base_uri, body_io)
-      json_response(200, format_cookbooks_list(rest_path, base_uri, cookbooks))
-    end
-
-    def child(name)
-      @child_endpoint ||= CookbookEndpoint.new(cookbooks)
+      json_response(200, format_cookbooks_list(rest_path, base_uri, data['cookbooks']))
     end
   end
 
+  # /cookbooks/NAME
   class CookbookEndpoint < CookbooksBase
     def get(rest_path, base_uri, body_io)
-      name = rest_path[-1]
-      json_response(200, format_cookbooks_list(rest_path, base_uri, { name => cookbooks[name] }))
-    end
-
-    def child(name)
-      @child_endpoint ||= CookbookVersionEndpoint.new(cookbooks)
+      name = rest_path[1]
+      json_response(200, format_cookbooks_list(rest_path, base_uri, { name => data['cookbooks'][name] }))
     end
   end
 
-  class CookbookVersionEndpoint < CookbooksBase
+  # /cookbooks/NAME/VERSION
+  class CookbookVersionEndpoint < RestObjectEndpoint
     def get(rest_path, base_uri, body_io)
-      name = rest_path[-2]
-      version = rest_path[-1]
-      return error(404, "No cookbook named #{name}") if !cookbooks[name]
-      if version == "_latest"
-        sorted_versions = cookbooks[name].keys.sort_by { |version| Chef::Version.new(version) }
-        version = sorted_versions[-1]
+      if rest_path[2] == "_latest"
+        sorted_versions = data['cookbooks'][rest_path[1]].keys.sort_by { |version| Chef::Version.new(version) }
+        rest_path[2] = sorted_versions[-1]
       end
-      return error(404, "No #{name} cookbooks with version #{version}") if !cookbooks[name][version]
-      already_json_response(200, cookbooks[name][version])
+      super(rest_path, base_uri, body_io)
     end
 
     def put(rest_path, base_uri, body_io)
-      name = rest_path[-2]
-      version = rest_path[-1]
-      cookbooks[name] = {} if !cookbooks[name]
-      response_code = cookbooks[name][version] ? 200 : 201
-      cookbooks[name][version] = body_io.read
-      already_json_response(response_code, cookbooks[name][version])
+      name = rest_path[1]
+      version = rest_path[2]
+      data['cookbooks'][name] = {} if !data['cookbooks'][name]
+      response_code = data['cookbooks'][name][version] ? 200 : 201
+      data['cookbooks'][name][version] = body_io.read
+      already_json_response(response_code, data['cookbooks'][name][version])
     end
 
     def delete(rest_path, base_uri, body_io)
-      name = rest_path[-2]
-      version = rest_path[-1]
-      return error(404, "No cookbook named #{name}") if !cookbooks[name]
-      return error(404, "No #{name} cookbooks with version #{version}") if !cookbooks[name][version]
-      response = cookbooks[name][version]
-      cookbooks[name].delete(version)
-      cookbooks.delete(name) if cookbooks[name].size == 0
-      already_json_response(200, response)
+      response = super(rest_path, base_uri, body_io)
+      cookbook_name = rest_path[1]
+      data['cookbooks'].delete(cookbook_name) if data['cookbooks'][cookbook_name].size == 0
+      response
     end
   end
 
+  # /environments/NAME/cookbooks
   class EnvironmentCookbooksEndpoint < CookbooksBase
-    def initialize(environments, cookbooks)
-      super(cookbooks)
-      @environments = environments
-    end
-
-    attr_reader :environments
-
     def get(rest_path, base_uri, body_io)
-      name = rest_path[-2]
-      environment = JSON.parse(environments[name], :create_additions => false)
+      environment = JSON.parse(get_data(rest_path[0..1], base_uri), :create_additions => false)
       constraints = environment['cookbook_versions']
-      json_response(200, format_cookbooks_list(rest_path[0..-2], base_uri, cookbooks, constraints))
-    end
-
-    def child(name)
-      puts "#{name}: #{cookbooks.keys}"
-      if cookbooks[name]
-        EnvironmentCookbookEndpoint.new(environments, cookbooks)
-      else
-        nil
-      end
+      json_response(200, format_cookbooks_list(rest_path[0..1], base_uri, data['cookbooks'], constraints))
     end
   end
 
+  # /environments/NAME/cookbooks/NAME
   class EnvironmentCookbookEndpoint < CookbooksBase
-    def initialize(environments, cookbooks)
-      super(cookbooks)
-      @environments = environments
-    end
-
-    attr_reader :environments
-
     def get(rest_path, base_uri, body_io)
-      name = rest_path[-3]
       cookbook_name = rest_path[-1]
-      environment = JSON.parse(environments[name], :create_additions => false)
+      environment = JSON.parse(get_data(rest_path[0..1], base_uri), :create_additions => false)
       constraints = environment['cookbook_versions']
-      json_response(200, format_cookbooks_list(rest_path[0..-3], base_uri, { cookbook_name => cookbooks[cookbook_name] }, constraints))
+      json_response(200, format_cookbooks_list(rest_path[0..1], base_uri, { cookbook_name => data['cookbooks'][cookbook_name] }, constraints))
     end
   end
 
-  class EnvironmentCookbookVersionsEndpoint < CookbooksBase
-    def initialize(environments, cookbooks)
-      super(cookbooks)
-      @environments = environments
+  # /environments/NAME/cookbook_versions
+  class EnvironmentCookbookVersionsEndpoint < RestBase
+    def cookbooks
+      data['cookbooks']
     end
 
-    attr_reader :environments
+    def environments
+      data['environments']
+    end
 
     def post(rest_path, base_uri, body_io)
       # Get the list of cookbooks and versions desired by the runlist
