@@ -359,7 +359,8 @@ class TinyChefServer
     class RegexpableQuery
       def initialize(regexp_string, literal_string)
         @regexp_string = regexp_string
-        @regexp = Regexp.new(regexp_string, true)
+        # Surround the regexp with word boundaries
+        @regexp = Regexp.new("(^|\\W)#{regexp_string}($|\\W)", true)
         @literal_string = literal_string
       end
 
@@ -385,7 +386,7 @@ class TinyChefServer
         index = 0
         while index < term.length
           if term[index] == '*'
-            regexp_string << '\w+'
+            regexp_string << '\w*'
             literal_string = nil
             index += 1
           elsif term[index] == '?'
