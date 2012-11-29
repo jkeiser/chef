@@ -80,6 +80,8 @@ EOM
         [ '/roles/*', RestObjectEndpoint.new(data) ],
         [ '/sandboxes', SandboxesEndpoint.new(data) ],
         [ '/sandboxes/*', SandboxEndpoint.new(data) ],
+        [ '/search', SearchesEndpoint.new(data) ],
+        [ '/search/*', SearchEndpoint.new(data) ],
 
         [ '/file_store/*', FileStoreFileEndpoint.new(data) ],
       ])
@@ -133,6 +135,16 @@ EOM
 
     def body
       @body ||= env['rack.input'].read
+    end
+
+    def query_params
+      @query_params ||= begin
+        params = Rack::Request.new(env).GET
+        params.keys.each do |key|
+          params[key] = URI.unescape(params[key])
+        end
+        params
+      end
     end
   end
 
@@ -204,7 +216,7 @@ EOM
   end
 
   class NotFoundEndpoint
-    def call(request)
+    def call(env)
       return [404, {"Content-Type" => "application/json"}, "Object not found: #{env['REQUEST_PATH']}"]
     end
   end
@@ -266,6 +278,8 @@ EOM
       result = super(request)
       if result[0] == 201
         uri = JSON.parse(result[2], :create_additions => false)["uri"]
+        # TODO support "rekeying" in PUT /clients/NAME
+        # and find out if we should return private_key if the user PUTs a public_key
         json_response(201, {
           "uri" => uri,
           "private_key" => PRIVATE_KEY
@@ -549,6 +563,8 @@ EOM
     end
   end
 end
+
+require 'tiny_chef_server_search'
 
 server = TinyChefServer.new(:Port => 8889)
 server.start
