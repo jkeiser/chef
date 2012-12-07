@@ -52,7 +52,8 @@ EOM
       'file_store' => {},
       'nodes' => {},
       'roles' => {},
-      'sandboxes' => {}
+      'sandboxes' => {},
+      'users' => {}
     }
   end
 
@@ -61,7 +62,7 @@ EOM
   def app
     @app ||= begin
       router = Router.new([
-        [ '/clients', ClientsEndpoint.new(data) ],
+        [ '/clients', ActorsEndpoint.new(data) ],
         [ '/clients/*', RestObjectEndpoint.new(data) ],
         [ '/cookbooks', CookbooksEndpoint.new(data) ],
         [ '/cookbooks/*', CookbookEndpoint.new(data) ],
@@ -82,6 +83,8 @@ EOM
         [ '/sandboxes/*', SandboxEndpoint.new(data) ],
         [ '/search', SearchesEndpoint.new(data) ],
         [ '/search/*', SearchEndpoint.new(data) ],
+        [ '/users', ActorsEndpoint.new(data) ],
+        [ '/users/*', RestObjectEndpoint.new(data) ],
 
         [ '/file_store/*', FileStoreFileEndpoint.new(data) ],
       ])
@@ -272,8 +275,8 @@ EOM
     end
   end
 
-  # /clients
-  class ClientsEndpoint < RestListEndpoint
+  # /clients or /users
+  class ActorsEndpoint < RestListEndpoint
     def post(request)
       result = super(request)
       if result[0] == 201
