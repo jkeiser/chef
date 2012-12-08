@@ -230,6 +230,10 @@ EOM
     def build_uri(base_uri, rest_path)
       "#{base_uri}/#{rest_path.join('/')}"
     end
+
+    def populate_defaults(rest_path, response)
+      response
+    end
   end
 
   class RestErrorResponse < Exception
@@ -289,7 +293,7 @@ EOM
     attr_reader :identity_key
 
     def get(request)
-      already_json_response(200, get_data(request))
+      already_json_response(200, populate_defaults(request.rest_path, get_data(request)))
     end
     def put(request)
       # We grab the old body to trigger a 404 if it doesn't exist
@@ -304,9 +308,12 @@ EOM
           return error(409, "Cannot rename '#{request.rest_path[0..-2]}' to '#{key}': '#{key}' already exists")
         end
         container.delete(request.rest_path[-1])
+        container[key] = request.body
+        already_json_response(201, populate_defaults(request.rest_path, request.body))
+      else
+        container[key] = request.body
+        already_json_response(200, populate_defaults(request.rest_path, request.body))
       end
-      container[key] = request.body
-      already_json_response(rename ? 201 : 200, request.body)
     end
     def delete(request)
       key = request.rest_path[-1]
@@ -342,8 +349,8 @@ EOM
       if result[0] == 201
         public_key = JSON.parse(request.body, :create_additions => false)['public_key']
         response = JSON.parse(result[2], :create_additions => false)
-        response["public_key"] = public_key || PUBLIC_KEY
-        response["private_key"] = PRIVATE_KEY unless public_key
+        response['public_key'] = public_key || PUBLIC_KEY
+        response['private_key'] = PRIVATE_KEY unless public_key
         json_response(201, response)
       else
         result
@@ -353,17 +360,6 @@ EOM
 
   # /clients/* and /users/*
   class ActorEndpoint < RestObjectEndpoint
-    def get(request)
-      result = super(request)
-      if result[0] == 200
-        response = JSON.parse(result[2], :create_additions => false)
-        response['public_key'] ||= PUBLIC_KEY
-        json_response(200, response)
-      else
-        result
-      end
-    end
-
     def put(request)
       request_body = JSON.parse(request.body, :create_additions => false)
       gen_private_key = request_body['private_key']
@@ -375,11 +371,19 @@ EOM
       if result[0] == 200
         response = JSON.parse(result[2], :create_additions => false)
         response['private_key'] = PRIVATE_KEY if gen_private_key
-        response['public_key'] ||= PUBLIC_KEY
         json_response(200, response)
       else
         result
       end
+    end
+
+    def populate_defaults(rest_path, response)
+      response_json = JSON.parse(response, :create_additions => false)
+      response_json['name'] ||= rest_path[-1]
+      response_json['admin'] ||= false
+      response_json['validator'] ||= false
+      response_json['public_key'] ||= PUBLIC_KEY
+      JSON.pretty_generate(response_json)
     end
   end
 
