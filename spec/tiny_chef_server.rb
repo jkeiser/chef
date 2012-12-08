@@ -312,15 +312,19 @@ EOM
   # /clients or /users
   class ActorsEndpoint < RestListEndpoint
     def post(request)
-      result = super(request)
-      if result[0] == 201
-        uri = JSON.parse(result[2], :create_additions => false)["uri"]
-        # TODO support "rekeying" in PUT /clients/NAME
-        # and find out if we should return private_key if the user PUTs a public_key
-        json_response(201, {
-          "uri" => uri,
-          "private_key" => PRIVATE_KEY
-        })
+      container = get_data(request)
+      actor = JSON.parse(request.body, :create_additions => false)
+      name = actor[identity_key]
+      if container[name]
+        error(409, "Object already exists")
+      else
+        has_public_key = actor['public_key']
+        actor['public_key'] = PUBLIC_KEY if !has_public_key
+        container[name] = JSON.pretty_generate(actor)
+        response = {"uri" => "#{build_uri(request.base_uri, request.rest_path + [name])}"}
+        response["public_key"] = actor['public_key']
+        response["private_key"] = PRIVATE_KEY unless has_public_key
+        json_response(201, response)
       end
     end
   end
