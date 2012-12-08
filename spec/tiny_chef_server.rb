@@ -293,6 +293,9 @@ EOM
     def delete(request)
       key = request.rest_path[-1]
       container = get_data(request, request.rest_path[0..-2])
+      if !container.has_key?(key)
+        raise RestErrorResponse.new(404, "Object not found: #{build_uri(request.base_uri, request.rest_path)}")
+      end
       result = container[key]
       container.delete(key)
       already_json_response(200, result)
