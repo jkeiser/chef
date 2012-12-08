@@ -31,13 +31,13 @@ class TinyChefServer < Rack::Server
     super(options)
     @data = {
       'clients' => {
-        'chef-validator' => TinyChefServer::make_client('chef-validator', true, false),
-        'chef-webui' => TinyChefServer::make_client('chef-webui', false, true)
+        'chef-validator' => '{ "validator": true }',
+        'chef-webui' => '{ "admin": true }'
       },
       'cookbooks' => {},
       'data' => {},
       'environments' => {
-        "_default" => DEFAULT_ENVIRONMENT
+        '_default' => '{ "description": "The default Chef environment" }'
       },
       'file_store' => {},
       'nodes' => {},
@@ -89,34 +89,6 @@ class TinyChefServer < Rack::Server
   PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0sOY9tHvVtLZ6xmVmH8d8LrRrNcWOXbrvvCrai+T3GtRvRSL\nhksLrpOpD0L9EHM6NdThNF/eGA9Oq+UKAe6yXR0hwsKuxKXqQ8SEmlhZZ9GiuggD\nB/zYD3ItB6SGpdkRe7kQqTChQyrIXqbRkJqxoTXLyeJDF0sCyTdp3L8IZCUWodM8\noV9TlQBJHYtG1gLUwIi8kcMVEoCn2Q8ltCj0/ftnwhTtwO52RkWA0uYOLGVayHsL\nSCFfx+ACWPU/oWCwW5/KBqb3veTv0aEg/nh0QsFzRLoTx6SRFI5dT2Nf8iiJe4WC\nUG8WKEB2G8QPnxsxfOPYDBdTJ4CXEi2e+z41VQIDAQABAoIBAALhqbW2KQ+G0nPk\nZacwFbi01SkHx8YBWjfCEpXhEKRy0ytCnKW5YO+CFU2gHNWcva7+uhV9OgwaKXkw\nKHLeUJH1VADVqI4Htqw2g5mYm6BPvWnNsjzpuAp+BR+VoEGkNhj67r9hatMAQr0I\nitTvSH5rvd2EumYXIHKfz1K1SegUk1u1EL1RcMzRmZe4gDb6eNBs9Sg4im4ybTG6\npPIytA8vBQVWhjuAR2Tm+wZHiy0Az6Vu7c2mS07FSX6FO4E8SxWf8idaK9ijMGSq\nFvIS04mrY6XCPUPUC4qm1qNnhDPpOr7CpI2OO98SqGanStS5NFlSFXeXPpM280/u\nfZUA0AECgYEA+x7QUnffDrt7LK2cX6wbvn4mRnFxet7bJjrfWIHf+Rm0URikaNma\nh0/wNKpKBwIH+eHK/LslgzcplrqPytGGHLOG97Gyo5tGAzyLHUWBmsNkRksY2sPL\nuHq6pYWJNkqhnWGnIbmqCr0EWih82x/y4qxbJYpYqXMrit0wVf7yAgkCgYEA1twI\ngFaXqesetTPoEHSQSgC8S4D5/NkdriUXCYb06REcvo9IpFMuiOkVUYNN5d3MDNTP\nIdBicfmvfNELvBtXDomEUD8ls1UuoTIXRNGZ0VsZXu7OErXCK0JKNNyqRmOwcvYL\nJRqLfnlei5Ndo1lu286yL74c5rdTLs/nI2p4e+0CgYB079ZmcLeILrmfBoFI8+Y/\ngJLmPrFvXBOE6+lRV7kqUFPtZ6I3yQzyccETZTDvrnx0WjaiFavUPH27WMjY01S2\nTMtO0Iq1MPsbSrglO1as8MvjB9ldFcvp7gy4Q0Sv6XT0yqJ/S+vo8Df0m+H4UBpU\nf5o6EwBSd/UQxwtZIE0lsQKBgQCswfjX8Eg8KL/lJNpIOOE3j4XXE9ptksmJl2sB\njxDnQYoiMqVO808saHVquC/vTrpd6tKtNpehWwjeTFuqITWLi8jmmQ+gNTKsC9Gn\n1Pxf2Gb67PqnEpwQGln+TRtgQ5HBrdHiQIi+5am+gnw89pDrjjO5rZwhanAo6KPJ\n1zcPNQKBgQDxFu8v4frDmRNCVaZS4f1B6wTrcMrnibIDlnzrK9GG6Hz1U7dDv8s8\nNf4UmeMzDXjlPWZVOvS5+9HKJPdPj7/onv8B2m18+lcgTTDJBkza7R1mjL1Cje/Z\nKcVGsryKN6cjE7yCDasnA7R2rVBV/7NWeJV77bmzT5O//rW4yIfUIg==\n-----END RSA PRIVATE KEY-----\n"
 
   private
-
-  DEFAULT_ENVIRONMENT = <<EOM
-{
-  "name": "_default",
-  "description": "The default Chef environment",
-  "cookbook_versions": {
-  },
-  "json_class": "Chef::Environment",
-  "chef_type": "environment",
-  "default_attributes": {
-  },
-  "override_attributes": {
-  }
-}
-EOM
-
-  def self.make_client(clientname, validator, admin)
-    result = <<EOM
-{
-  "clientname": "#{clientname}",
-  "name": "#{clientname}",
-  "certificate": #{PUBLIC_KEY.inspect},
-  "validator": #{validator},
-  "admin": #{admin}
-}
-EOM
-    result
-  end
 
   class Router
     def initialize(routes)
@@ -347,8 +319,8 @@ EOM
   class AuthenticateUserEndpoint < RestBase
     def post(request)
       request_json = JSON.parse(request.body, :create_additions => false)
-      name = request_json["name"]
-      password = request_json["password"]
+      name = request_json['name']
+      password = request_json['password']
       user = data['users'][name]
       verified = user && JSON.parse(user, :create_additions => false)['password'] == password
       json_response(200, {
@@ -402,8 +374,12 @@ EOM
       response_json = JSON.parse(response, :create_additions => false)
       response_json['name'] ||= rest_path[-1]
       response_json['admin'] ||= false
-      response_json['validator'] ||= false
       response_json['public_key'] ||= PUBLIC_KEY
+      if rest_path[0] == 'clients'
+        response_json['validator'] ||= false
+        response_json['json_class'] ||= "Chef::ApiClient"
+        response_json['chef_type'] ||= "client"
+      end
       JSON.pretty_generate(response_json)
     end
   end
@@ -432,12 +408,25 @@ EOM
         super(request)
       end
     end
+
     def put(request)
       if request.rest_path[1] == "_default"
         error(403, "_default environment cannot be modified")
       else
         super(request)
       end
+    end
+
+    def populate_defaults(rest_path, response)
+      response_json = JSON.parse(response, :create_additions => false)
+      response_json['name'] ||= rest_path[-1]
+      response_json['description'] ||= ''
+      response_json['cookbook_versions'] ||= {}
+      response_json['json_class'] ||= "Chef::Environment"
+      response_json['chef_type'] ||= "environment"
+      response_json['default_attributes'] ||= {}
+      response_json['override_attributes'] ||= {}
+      JSON.pretty_generate(response_json)
     end
   end
 
