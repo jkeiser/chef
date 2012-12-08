@@ -156,6 +156,10 @@ EOM
       @rest_path ||= env['PATH_INFO'].split('/').select { |part| part != "" }
     end
 
+    def body=(body)
+      @body = body
+    end
+
     def body
       @body ||= env['rack.input'].read
     end
@@ -332,6 +336,24 @@ EOM
       result = super(request)
       if result[0] == 200
         response = JSON.parse(result[2], :create_additions => false)
+        response['public_key'] ||= PUBLIC_KEY
+        json_response(200, response)
+      else
+        result
+      end
+    end
+
+    def put(request)
+      request_body = JSON.parse(request.body, :create_additions => false)
+      gen_private_key = request_body['private_key']
+      if gen_private_key
+        request_body.delete('private_key')
+        request.body = JSON.pretty_generate(request_body)
+      end
+      result = super(request)
+      if result[0] == 200
+        response = JSON.parse(result[2], :create_additions => false)
+        response['private_key'] = PRIVATE_KEY if gen_private_key
         response['public_key'] ||= PUBLIC_KEY
         json_response(200, response)
       else
