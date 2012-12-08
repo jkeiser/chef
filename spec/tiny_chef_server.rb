@@ -187,7 +187,7 @@ EOM
         rest_path = env['PATH_INFO'].split('/').select { |part| part != "" }
         method = env['REQUEST_METHOD'].downcase.to_sym
         if !self.respond_to?(method)
-          return error(400, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}")
+          return error(405, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}")
         end
         # Dispatch to get()/post()/put()/delete()
         begin
