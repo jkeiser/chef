@@ -295,6 +295,7 @@ EOM
     def get(request)
       already_json_response(200, populate_defaults(request.rest_path, get_data(request)))
     end
+
     def put(request)
       # We grab the old body to trigger a 404 if it doesn't exist
       old_body = get_data(request)
@@ -315,6 +316,7 @@ EOM
         already_json_response(200, populate_defaults(request.rest_path, request.body))
       end
     end
+
     def delete(request)
       key = request.rest_path[-1]
       container = get_data(request, request.rest_path[0..-2])
@@ -324,6 +326,20 @@ EOM
       result = container[key]
       container.delete(key)
       already_json_response(200, result)
+    end
+
+    def patch_request_body(request)
+      container = get_data(request, request.rest_path[0..-2])
+      existing_value = container[request.rest_path[-1]]
+      if existing_value
+        request_json = JSON.parse(request.body, :create_additions => false)
+        existing_json = JSON.parse(existing_value, :create_additions => false)
+        merged_json = existing_json.merge(request_json)
+        if merged_json.size > request_json.size
+          return JSON.pretty_generate(merged_json)
+        end
+      end
+      request.body
     end
   end
 
@@ -361,10 +377,15 @@ EOM
   # /clients/* and /users/*
   class ActorEndpoint < RestObjectEndpoint
     def put(request)
+      # PUT /clients is patchy
+      request.body = patch_request_body(request)
+
+      # Honor private_key
       request_body = JSON.parse(request.body, :create_additions => false)
       gen_private_key = request_body['private_key']
       if gen_private_key
         request_body.delete('private_key')
+        request_body.delete('public_key')
         request.body = JSON.pretty_generate(request_body)
       end
       result = super(request)
