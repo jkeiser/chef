@@ -31,8 +31,8 @@ class TinyChefServer < Rack::Server
     super(options)
     @data = {
       'clients' => {
-        'chef-validator' => TinyChefServer::make_client('chef-validator'),
-        'chef-webui' => TinyChefServer::make_client('chef-webui')
+        'chef-validator' => TinyChefServer::make_client('chef-validator', true, false),
+        'chef-webui' => TinyChefServer::make_client('chef-webui', false, true)
       },
       'cookbooks' => {},
       'data' => {},
@@ -105,14 +105,14 @@ class TinyChefServer < Rack::Server
 }
 EOM
 
-  def self.make_client(clientname)
+  def self.make_client(clientname, validator, admin)
     result = <<EOM
 {
-  "clientname": "#{clientname}"
+  "clientname": "#{clientname}",
   "name": "#{clientname}",
   "certificate": #{PUBLIC_KEY.inspect},
-  "validator": true,
-  "is_admin": true,
+  "validator": #{validator},
+  "admin": #{admin}
 }
 EOM
     result
@@ -204,7 +204,7 @@ EOM
       value = data
       rest_path.each do |path_part|
         if !value.has_key?(path_part)
-          raise RestErrorResponse(404, "Object not found: #{build_uri(request.base_uri, rest_path)}")
+          raise RestErrorResponse.new(404, "Object not found: #{build_uri(request.base_uri, rest_path)}")
         end
         value = value[path_part]
       end
@@ -228,7 +228,7 @@ EOM
     end
   end
 
-  class RestErrorResponse
+  class RestErrorResponse < Exception
     def initialize(response_code, error)
       @response_code = response_code
       @error = error
