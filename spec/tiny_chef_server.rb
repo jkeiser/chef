@@ -746,7 +746,7 @@ class TinyChefServer < Rack::Server
 
       result = {}
       solved.each_pair do |name, versions|
-        result[name] = versions[0]
+        result[name] = JSON.parse(data['cookbooks'][name][versions[0]], :create_additions => false)
       end
       json_response(200, result)
     end
