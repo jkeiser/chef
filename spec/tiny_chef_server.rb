@@ -730,8 +730,7 @@ class TinyChefServer < Rack::Server
       end
 
       # Filter by environment constraints
-      environment_name = request.rest_path[1]
-      environment = JSON.parse(environments[environment_name], :create_additions => false)
+      environment = JSON.parse(get_data(request, request.rest_path[0..1]), :create_additions => false)
       environment_constraints = environment['cookbook_versions']
 
       desired_versions.each_key do |name|
