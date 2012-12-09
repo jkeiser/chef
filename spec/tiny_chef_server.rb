@@ -543,9 +543,11 @@ class TinyChefServer < Rack::Server
         result = []
         data['cookbooks'].each_pair do |name, versions|
           latest = JSON.parse(versions[latest_version(versions.keys)], :create_additions => false)
-          latest['recipes'].each do |recipe|
-            if recipe['path'] == "recipes/#{recipe['name']}" && recipe['name'][-3..-1] == '.rb'
-              result << "#{name}::#{recipe['name'][0..-4]}"
+          if latest['recipes']
+            latest['recipes'].each do |recipe|
+              if recipe['path'] == "recipes/#{recipe['name']}" && recipe['name'][-3..-1] == '.rb'
+                result << "#{name}::#{recipe['name'][0..-4]}"
+              end
             end
           end
         end
