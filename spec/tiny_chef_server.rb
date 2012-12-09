@@ -588,6 +588,24 @@ class TinyChefServer < Rack::Server
       version = request.rest_path[2]
       data['cookbooks'][name] = {} if !data['cookbooks'][name]
       existing_cookbook = data['cookbooks'][name][version]
+
+      # Honor frozen
+      if existing_cookbook
+        existing_cookbook_json = JSON.parse(existing_cookbook, :create_additions => false)
+        if existing_cookbook_json['frozen?']
+          if request.query_params['force'] != "true"
+            raise RestErrorResponse.new(409, "The cookbook #{name} at version #{version} is frozen. Use the 'force' option to override.")
+          end
+          # For some reason, you are forever unable to modify "frozen?" on a frozen cookbook.
+          request_json = JSON.parse(request.body, :create_additions => false)
+          if !request_json['frozen?']
+            request_json['frozen?'] = true
+            request.body = JSON.pretty_generate(request_json)
+          end
+        end
+      end
+
+      # Set the cookbook
       data['cookbooks'][name][version] = request.body
 
       # If the cookbook was updated, check for deleted files and clean them up
@@ -598,7 +616,7 @@ class TinyChefServer < Rack::Server
         end
       end
 
-      already_json_response(existing_cookbook ? 200 : 201, data['cookbooks'][name][version])
+      already_json_response(existing_cookbook ? 200 : 201, populate_defaults(request, data['cookbooks'][name][version]))
     end
 
     def delete(request)
