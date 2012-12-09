@@ -521,11 +521,6 @@ class TinyChefServer < Rack::Server
       end
       results
     end
-
-    def latest_version(versions)
-      sorted = versions.sort_by { |version| Chef::Version.new(version) }
-      sorted[-1]
-    end
   end
 
   # /cookbooks
@@ -572,13 +567,18 @@ class TinyChefServer < Rack::Server
       end
       result
     end
+
+    def latest_version(versions)
+      sorted = versions.sort_by { |version| Chef::Version.new(version) }
+      sorted[-1]
+    end
   end
 
   # /cookbooks/NAME/VERSION
   class CookbookVersionEndpoint < RestObjectEndpoint
     def get(request)
       if request.rest_path[2] == "_latest"
-        request.rest_path[2] = latest_version(data['cookbooks'][request.rest_path[1]].keys)
+        request.rest_path[2] = latest_version(get_data(request, request.rest_path[0..1]).keys)
       end
       super(request)
     end
@@ -677,6 +677,11 @@ class TinyChefServer < Rack::Server
       cookbook['metadata']['version'] ||= request.rest_path[-1]
       cookbook['metadata']['name'] ||= request.rest_path[-2]
       JSON.pretty_generate(cookbook)
+    end
+
+    def latest_version(versions)
+      sorted = versions.sort_by { |version| Chef::Version.new(version) }
+      sorted[-1]
     end
   end
 
