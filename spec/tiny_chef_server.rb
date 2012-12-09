@@ -551,10 +551,36 @@ class TinyChefServer < Rack::Server
     end
 
     def delete(request)
+      deleted_cookbook = get_data(request, request.rest_path)
       response = super(request)
       cookbook_name = request.rest_path[1]
       data['cookbooks'].delete(cookbook_name) if data['cookbooks'][cookbook_name].size == 0
+
+      # Hoover checksummed files, if they exist
+      deleted_checksums = get_checksums(deleted_cookbook)
+      data['cookbooks'].each_pair do |cookbook_name, versions|
+        versions.each_pair do |cookbook_version, cookbook|
+          deleted_checksums = deleted_checksums - get_checksums(cookbook)
+        end
+      end
+      deleted_checksums.each do |checksum|
+        data['file_store'].delete(checksum)
+      end
       response
+    end
+
+    def get_checksums(cookbook)
+      result = []
+      JSON.parse(cookbook, :create_additions => false).each_pair do |key, value|
+        if value.is_a?(Array)
+          value.each do |file|
+            if file.is_a?(Hash) && file.has_key?('checksum')
+              result << file['checksum']
+            end
+          end
+        end
+      end
+      result
     end
 
     def populate_defaults(request, response)
