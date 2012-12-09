@@ -472,8 +472,15 @@ class TinyChefServer < Rack::Server
   # /sandboxes/ID
   class SandboxEndpoint < RestBase
     def put(request)
+      existing_sandbox = get_data(request, request.rest_path)
       data['sandboxes'].delete(request.rest_path[1])
-      json_response(200, { :sandbox_id => request.rest_path[1]})
+      json_response(200, {
+        :guid => request.rest_path[1],
+        :name => request.rest_path[1],
+        :checksums => existing_sandbox,
+#        :create_time => TODO ???
+        :is_completed => true
+      })
     end
   end
 
@@ -580,9 +587,18 @@ class TinyChefServer < Rack::Server
       name = request.rest_path[1]
       version = request.rest_path[2]
       data['cookbooks'][name] = {} if !data['cookbooks'][name]
-      response_code = data['cookbooks'][name][version] ? 200 : 201
+      existing_cookbook = data['cookbooks'][name][version]
       data['cookbooks'][name][version] = request.body
-      already_json_response(response_code, data['cookbooks'][name][version])
+
+      # If the cookbook was updated, check for deleted files and clean them up
+      if existing_cookbook
+        missing_checksums = get_checksums(existing_cookbook) - get_checksums(request.body)
+        if missing_checksums.size > 0
+          hoover_unused_checksums(missing_checksums)
+        end
+      end
+
+      already_json_response(existing_cookbook ? 200 : 201, data['cookbooks'][name][version])
     end
 
     def delete(request)
@@ -591,16 +607,8 @@ class TinyChefServer < Rack::Server
       cookbook_name = request.rest_path[1]
       data['cookbooks'].delete(cookbook_name) if data['cookbooks'][cookbook_name].size == 0
 
-      # Hoover checksummed files, if they exist
-      deleted_checksums = get_checksums(deleted_cookbook)
-      data['cookbooks'].each_pair do |cookbook_name, versions|
-        versions.each_pair do |cookbook_version, cookbook|
-          deleted_checksums = deleted_checksums - get_checksums(cookbook)
-        end
-      end
-      deleted_checksums.each do |checksum|
-        data['file_store'].delete(checksum)
-      end
+      # Hoover deleted files, if they exist
+      hoover_unused_checksums(get_checksums(deleted_cookbook))
       response
     end
 
@@ -616,6 +624,17 @@ class TinyChefServer < Rack::Server
         end
       end
       result
+    end
+
+    def hoover_unused_checksums(deleted_checksums)
+      data['cookbooks'].each_pair do |cookbook_name, versions|
+        versions.each_pair do |cookbook_version, cookbook|
+          deleted_checksums = deleted_checksums - get_checksums(cookbook)
+        end
+      end
+      deleted_checksums.each do |checksum|
+        data['file_store'].delete(checksum)
+      end
     end
 
     def populate_defaults(request, response)
