@@ -203,7 +203,7 @@ class TinyChefServer < Rack::Server
       "#{base_uri}/#{rest_path.join('/')}"
     end
 
-    def populate_defaults(rest_path, response)
+    def populate_defaults(request, response)
       response
     end
   end
@@ -265,7 +265,7 @@ class TinyChefServer < Rack::Server
     attr_reader :identity_key
 
     def get(request)
-      already_json_response(200, populate_defaults(request.rest_path, get_data(request)))
+      already_json_response(200, populate_defaults(request, get_data(request)))
     end
 
     def put(request)
@@ -282,10 +282,10 @@ class TinyChefServer < Rack::Server
         end
         container.delete(request.rest_path[-1])
         container[key] = request.body
-        already_json_response(201, populate_defaults(request.rest_path, request.body))
+        already_json_response(201, populate_defaults(request, request.body))
       else
         container[key] = request.body
-        already_json_response(200, populate_defaults(request.rest_path, request.body))
+        already_json_response(200, populate_defaults(request, request.body))
       end
     end
 
@@ -355,9 +355,11 @@ class TinyChefServer < Rack::Server
       # Honor private_key
       request_body = JSON.parse(request.body, :create_additions => false)
       gen_private_key = request_body['private_key']
-      if gen_private_key
+      if request_body.has_key?('private_key')
         request_body.delete('private_key')
-        request_body.delete('public_key')
+        if gen_private_key
+          request_body.delete('public_key')
+        end
         request.body = JSON.pretty_generate(request_body)
       end
       result = super(request)
@@ -370,9 +372,9 @@ class TinyChefServer < Rack::Server
       end
     end
 
-    def populate_defaults(rest_path, response)
+    def populate_defaults(request, response)
       response_json = JSON.parse(response, :create_additions => false)
-      response_json['name'] ||= rest_path[-1]
+      response_json['name'] ||= request.rest_path[-1]
       response_json['admin'] ||= false
       response_json['public_key'] ||= PUBLIC_KEY
       if rest_path[0] == 'clients'
@@ -417,9 +419,9 @@ class TinyChefServer < Rack::Server
       end
     end
 
-    def populate_defaults(rest_path, response)
+    def populate_defaults(request, response)
       response_json = JSON.parse(response, :create_additions => false)
-      response_json['name'] ||= rest_path[-1]
+      response_json['name'] ||= request.rest_path[-1]
       response_json['description'] ||= ''
       response_json['cookbook_versions'] ||= {}
       response_json['json_class'] ||= "Chef::Environment"
@@ -553,6 +555,30 @@ class TinyChefServer < Rack::Server
       cookbook_name = request.rest_path[1]
       data['cookbooks'].delete(cookbook_name) if data['cookbooks'][cookbook_name].size == 0
       response
+    end
+
+    def populate_defaults(request, response)
+      # Inject URIs into each cookbook file
+      cookbook = JSON.parse(response, :create_additions => false)
+      cookbook.each_pair do |key, value|
+        if value.is_a?(Array)
+          value.each do |file|
+            if file.is_a?(Hash) && file.has_key?('checksum')
+              file['url'] ||= build_uri(request.base_uri, ['file_store', file['checksum']])
+            end
+          end
+        end
+      end
+      cookbook['name'] ||= "#{request.rest_path[-2]}-#{request.rest_path[-1]}"
+      cookbook['version'] ||= request.rest_path[-1]
+      cookbook['cookbook_name'] ||= request.rest_path[-2]
+      cookbook['json_class'] ||= 'Chef::CookbookVersion'
+      cookbook['chef_type'] ||= 'cookbook_version'
+      cookbook['frozen?'] ||= false
+      cookbook['metadata'] ||= {}
+      cookbook['metadata']['version'] ||= request.rest_path[-1]
+      cookbook['metadata']['name'] ||= request.rest_path[-2]
+      JSON.pretty_generate(cookbook)
     end
   end
 
