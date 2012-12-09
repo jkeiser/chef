@@ -496,10 +496,10 @@ class TinyChefServer < Rack::Server
       results = {}
       cookbooks_list.keys.sort.each do |name|
         constraint = Chef::VersionConstraint.new(constraints[name])
-        versions = {}
+        versions = []
         cookbooks_list[name].keys.sort.each do |version|
           if constraint.include?(version)
-            versions[version] = {
+            versions << {
               'url' => build_uri(request.base_uri, ['cookbooks', name, version]),
               'version' => version
             }
@@ -514,6 +514,11 @@ class TinyChefServer < Rack::Server
       end
       results
     end
+
+    def latest_version(versions)
+      sorted = versions.sort_by { |version| Chef::Version.new(version) }
+      sorted[-1]
+    end
   end
 
   # /cookbooks
@@ -526,8 +531,37 @@ class TinyChefServer < Rack::Server
   # /cookbooks/NAME
   class CookbookEndpoint < CookbooksBase
     def get(request)
-      name = request.rest_path[1]
-      json_response(200, format_cookbooks_list(request, { name => data['cookbooks'][name] }))
+      filter = request.rest_path[1]
+      case filter
+      when '_latest'
+        result = {}
+        data['cookbooks'].each_pair do |name, versions|
+          result[name] = build_uri(request.base_uri, ['cookbooks', name, latest_version(versions.keys)])
+        end
+        json_response(200, result)
+      when '_recipes'
+        result = []
+        data['cookbooks'].each_pair do |name, versions|
+          latest = JSON.parse(versions[latest_version(versions.keys)], :create_additions => false)
+          latest['recipes'].each do |recipe|
+            if recipe['path'] == "recipes/#{recipe['name']}" && recipe['name'][-3..-1] == '.rb'
+              result << "#{name}::#{recipe['name'][0..-4]}"
+            end
+          end
+        end
+        json_response(200, result.sort)
+      else
+        cookbook_list = { filter => get_data(request, request.rest_path) }
+        json_response(200, format_cookbooks_list(request, cookbook_list))
+      end
+    end
+
+    def latest_cookbook_versions()
+      result = []
+      data['cookbooks'].each_pair do |name, versions|
+        result << [ name, latest_version(versions.keys) ]
+      end
+      result
     end
   end
 
@@ -535,8 +569,7 @@ class TinyChefServer < Rack::Server
   class CookbookVersionEndpoint < RestObjectEndpoint
     def get(request)
       if request.rest_path[2] == "_latest"
-        sorted_versions = data['cookbooks'][request.rest_path[1]].keys.sort_by { |version| Chef::Version.new(version) }
-        request.rest_path[2] = sorted_versions[-1]
+        request.rest_path[2] = latest_version(data['cookbooks'][request.rest_path[1]].keys)
       end
       super(request)
     end
