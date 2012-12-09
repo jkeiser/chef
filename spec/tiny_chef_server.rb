@@ -720,11 +720,11 @@ class TinyChefServer < Rack::Server
       run_list = JSON.parse(request.body, :create_additions => false)['run_list']
       run_list.each do |run_list_entry|
         if run_list_entry =~ /(.+)\@(.+)/
-          error(400, "No such cookbook: #{$1}") if !cookbooks[$1]
-          error(400, "No such cookbook version for cookbook #{$1}: #{$2}") if !cookbooks[$1][$2]
+          raise RestErrorResponse.new(412, "No such cookbook: #{$1}") if !cookbooks[$1]
+          raise RestErrorResponse.new(412, "No such cookbook version for cookbook #{$1}: #{$2}") if !cookbooks[$1][$2]
           desired_versions[$1] = [ $2 ]
         else
-          error(400, "No such cookbook: #{run_list_entry}") if !cookbooks[run_list_entry]
+          raise RestErrorResponse.new(412, "No such cookbook: #{run_list_entry}") if !cookbooks[run_list_entry]
           desired_versions[run_list_entry] = cookbooks[run_list_entry].keys
         end
       end
@@ -740,7 +740,7 @@ class TinyChefServer < Rack::Server
       # Depsolve!
       solved = depsolve(desired_versions.keys, desired_versions, environment_constraints)
       if !solved
-        return error(400, "Unsolvable versions!")
+        return raise RestErrorResponse.new(412, "Unsolvable versions!")
       end
 
       result = {}
@@ -766,16 +766,24 @@ class TinyChefServer < Rack::Server
 
         # Pick this cookbook, and add dependencies
         cookbook_obj = JSON.parse(cookbooks[solve_for][desired_version], :create_additions => false)
+        dep_not_found = false
         cookbook_obj['metadata']['dependencies'].each_pair do |dep_name, dep_constraint|
           # If the dep is not already in the list, add it to the list to solve
           # and bring in all environment-allowed cookbook versions to desired_versions
           if !new_desired_versions.has_key?(dep_name)
             new_unsolved = new_unsolved + [dep_name]
+            # If the dep is missing, we will try other versions of the cookbook that might not have the bad dep.
+            if !cookbooks[dep_name]
+              dep_not_found = true
+              break
+            end
             new_desired_versions[dep_name] = cookbooks[dep_name].keys
             new_desired_versions = filter_by_constraint(new_desired_versions, dep_name, environment_constraints[dep_name])
           end
           new_desired_versions = filter_by_constraint(new_desired_versions, dep_name, dep_constraint)
         end
+
+        next if dep_not_found
 
         # Depsolve children with this desired version!  First solution wins.
         result = depsolve(new_unsolved, new_desired_versions, environment_constraints)
