@@ -416,6 +416,8 @@ class TinyChefServer < Rack::Server
       response = super(request)
       if response[0] == 201
         already_json_response(201, DataBagItemEndpoint::populate_defaults(request, request.body, request.rest_path[1], key))
+      else
+        response
       end
     end
 
