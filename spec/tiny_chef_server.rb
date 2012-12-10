@@ -68,6 +68,7 @@ class TinyChefServer < Rack::Server
         [ '/environments/*/cookbook_versions', EnvironmentCookbookVersionsEndpoint.new(data) ],
         [ '/environments/*/nodes', EnvironmentNodesEndpoint.new(data) ],
         [ '/environments/*/recipes', EnvironmentRecipesEndpoint.new(data) ],
+        [ '/environments/*/roles/*', EnvironmentRoleEndpoint.new(data) ],
         [ '/nodes', RestListEndpoint.new(data) ],
         [ '/nodes/*', RestObjectEndpoint.new(data) ],
         [ '/roles', RestListEndpoint.new(data) ],
@@ -932,6 +933,25 @@ class TinyChefServer < Rack::Server
         result += recipe_names(cookbook_name, cookbook)
       end
       json_response(200, result.sort)
+    end
+  end
+
+  # /environment/NAME/roles/NAME
+  class EnvironmentRoleEndpoint < CookbooksBase
+    def get(request)
+      # Check for environment existence
+      environment = get_data(request, request.rest_path[0..1])
+      role = JSON.parse(get_data(request, request.rest_path[2..3]), :create_additions => false)
+      environment_name = request.rest_path[1]
+      if environment_name == '_default'
+        run_list = role['run_list']
+      else
+        if role['env_run_lists']
+          run_list = role['env_run_lists'][environment_name]
+        end
+      end
+      run_list ||= []
+      json_response(200, { 'run_list' => run_list })
     end
   end
 end
