@@ -59,7 +59,7 @@ class TinyChefServer < Rack::Server
         [ '/cookbooks/*', CookbookEndpoint.new(data) ],
         [ '/cookbooks/*/*', CookbookVersionEndpoint.new(data) ],
         [ '/data', DataBagsEndpoint.new(data) ],
-        [ '/data/*', RestListEndpoint.new(data, 'id') ],
+        [ '/data/*', DataBagEndpoint.new(data) ],
         [ '/data/*/*', RestObjectEndpoint.new(data, 'id') ],
         [ '/environments', RestListEndpoint.new(data) ],
         [ '/environments/*', EnvironmentEndpoint.new(data) ],
@@ -398,6 +398,24 @@ class TinyChefServer < Rack::Server
         container[name] = {}
         json_response(201, {"uri" => "#{build_uri(request.base_uri, request.rest_path + [name])}"})
       end
+    end
+  end
+
+  # /data/NAME
+  class DataBagEndpoint < RestListEndpoint
+    def initialize(data)
+      super(data, 'id')
+    end
+
+    def delete(request)
+      key = request.rest_path[1]
+      container = data['data']
+      if !container.has_key?(key)
+        raise RestErrorResponse.new(404, "Object not found: #{build_uri(request.base_uri, request.rest_path)}")
+      end
+      result = container[key]
+      container.delete(key)
+      already_json_response(200, result)
     end
   end
 
