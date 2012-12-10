@@ -572,12 +572,13 @@ class TinyChefServer < Rack::Server
 
   # Common code for endpoints that return cookbook lists
   class CookbooksBase < RestBase
-    def format_cookbooks_list(request, cookbooks_list, constraints = {})
+    def format_cookbooks_list(request, cookbooks_list, constraints = {}, num_versions = nil)
       results = {}
       cookbooks_list.keys.sort.each do |name|
         constraint = Chef::VersionConstraint.new(constraints[name])
         versions = []
-        cookbooks_list[name].keys.sort.each do |version|
+        cookbooks_list[name].keys.sort_by { |version| Chef::Version.new(version) }.reverse.each do |version|
+          break if num_versions && versions.size >= num_versions
           if constraint.include?(version)
             versions << {
               'url' => build_uri(request.base_uri, ['cookbooks', name, version]),
@@ -585,12 +586,10 @@ class TinyChefServer < Rack::Server
             }
           end
         end
-        if versions.size > 0
-          results[name] = {
-            'url' => build_uri(request.base_uri, ['cookbooks', name]),
-            'versions' => versions
-          }
-        end
+        results[name] = {
+          'url' => build_uri(request.base_uri, ['cookbooks', name]),
+          'versions' => versions
+        }
       end
       results
     end
@@ -631,14 +630,6 @@ class TinyChefServer < Rack::Server
         cookbook_list = { filter => get_data(request, request.rest_path) }
         json_response(200, format_cookbooks_list(request, cookbook_list))
       end
-    end
-
-    def latest_cookbook_versions()
-      result = []
-      data['cookbooks'].each_pair do |name, versions|
-        result << [ name, latest_version(versions.keys) ]
-      end
-      result
     end
 
     def latest_version(versions)
@@ -763,7 +754,14 @@ class TinyChefServer < Rack::Server
     def get(request)
       environment = JSON.parse(get_data(request, request.rest_path[0..1]), :create_additions => false)
       constraints = environment['cookbook_versions']
-      json_response(200, format_cookbooks_list(request, data['cookbooks'], constraints))
+      if request.query_params['num_versions'] == 'all'
+        num_versions = nil
+      elsif request.query_params['num_versions']
+        num_versions = request.query_params['num_versions'].to_i
+      else
+        num_versions = 1
+      end
+      json_response(200, format_cookbooks_list(request, data['cookbooks'], constraints, num_versions))
     end
   end
 
