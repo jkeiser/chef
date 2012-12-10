@@ -108,7 +108,7 @@ class TinyChefServer
       end
       {
         'rows' => result,
-        'start' => start,
+        'start' => start || 0,
         'total' => total
       }
     end
