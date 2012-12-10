@@ -449,16 +449,27 @@ class TinyChefServer < Rack::Server
 
     def self.populate_defaults(request, response, data_bag, data_bag_item)
       response_json = JSON.parse(response, :create_additions => false)
-      # If it's not already wrapped with raw_data, wrap it.
-      if response_json['json_class'] == 'Chef::DataBagItem' && response_json['raw_data']
-        response_json = response_json['raw_data']
+      if request.method == 'DELETE'
+        # TODO SERIOUSLY, WHO DOES THIS MANY EXCEPTIONS IN THEIR INTERFACE
+        if !(response_json['json_class'] == 'Chef::DataBagItem' && response_json['raw_data'])
+          response_json = { 'raw_data' => response_json }
+          response_json['chef_type'] ||= 'data_bag_item'
+          response_json['json_class'] ||= 'Chef::DataBagItem'
+          response_json['data_bag'] ||= data_bag
+          response_json['name'] ||= "data_bag_item_#{data_bag}_#{data_bag_item}"
+        end
+      else
+        # If it's not already wrapped with raw_data, wrap it.
+        if response_json['json_class'] == 'Chef::DataBagItem' && response_json['raw_data']
+          response_json = response_json['raw_data']
+        end
+        # Argh.  We don't do this on GET, but we do on PUT and POST????
+        if %w(PUT POST).include?(request.method)
+          response_json['chef_type'] ||= 'data_bag_item'
+          response_json['data_bag'] ||= data_bag
+        end
+        response_json['id'] ||= data_bag_item
       end
-      # Argh.  We don't do this on GET, but we do on PUT and POST????
-      if %w(PUT POST).include?(request.method)
-        response_json['chef_type'] ||= 'data_bag_item'
-        response_json['data_bag'] ||= data_bag
-      end
-      response_json['id'] ||= data_bag_item
       JSON.pretty_generate(response_json)
     end
   end
