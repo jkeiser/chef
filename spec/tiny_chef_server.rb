@@ -66,6 +66,7 @@ class TinyChefServer < Rack::Server
         [ '/environments/*/cookbooks', EnvironmentCookbooksEndpoint.new(data) ],
         [ '/environments/*/cookbooks/*', EnvironmentCookbookEndpoint.new(data) ],
         [ '/environments/*/cookbook_versions', EnvironmentCookbookVersionsEndpoint.new(data) ],
+        [ '/environments/*/nodes', EnvironmentNodesEndpoint.new(data) ],
         [ '/nodes', RestListEndpoint.new(data) ],
         [ '/nodes/*', RestObjectEndpoint.new(data) ],
         [ '/roles', RestListEndpoint.new(data) ],
@@ -481,7 +482,8 @@ class TinyChefServer < Rack::Server
   class EnvironmentEndpoint < RestObjectEndpoint
     def delete(request)
       if request.rest_path[1] == "_default"
-        error(403, "_default environment cannot be modified")
+        # 405, really?
+        error(405, "The '_default' environment cannot be modified.")
       else
         super(request)
       end
@@ -489,7 +491,8 @@ class TinyChefServer < Rack::Server
 
     def put(request)
       if request.rest_path[1] == "_default"
-        error(403, "_default environment cannot be modified")
+        # 404, 405 ... can we *decide* on an error code, please?
+        error(404, "The '_default' environment cannot be modified.")
       else
         super(request)
       end
@@ -879,6 +882,23 @@ class TinyChefServer < Rack::Server
       result = versions.clone
       result[cookbook_name] = new_versions
       result
+    end
+  end
+
+  # /environment/NAME/nodes
+  class EnvironmentNodesEndpoint < RestBase
+    def get(request)
+      # 404 if environment does not exist
+      get_data(request, request.rest_path[0..1])
+
+      result = {}
+      data['nodes'].each_pair do |name, node|
+        node_json = JSON.parse(node, :create_additions => false)
+        if node['chef_environment'] == request.rest_path[1]
+          result[name] = build_uri(request.base_uri, 'nodes', name)
+        end
+      end
+      json_response(200, result)
     end
   end
 end
