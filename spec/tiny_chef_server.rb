@@ -301,7 +301,7 @@ class TinyChefServer < Rack::Server
       end
       result = container[key]
       container.delete(key)
-      already_json_response(200, result)
+      already_json_response(200, populate_defaults(request, result))
     end
 
     def patch_request_body(request)
@@ -381,7 +381,7 @@ class TinyChefServer < Rack::Server
       response_json['name'] ||= request.rest_path[-1]
       response_json['admin'] ||= false
       response_json['public_key'] ||= PUBLIC_KEY
-      if rest_path[0] == 'clients'
+      if request.rest_path[0] == 'clients'
         response_json['validator'] ||= false
         response_json['json_class'] ||= "Chef::ApiClient"
         response_json['chef_type'] ||= "client"
