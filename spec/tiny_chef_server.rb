@@ -427,7 +427,11 @@ class TinyChefServer < Rack::Server
       end
       result = container[key]
       container.delete(key)
-      already_json_response(200, result)
+      json_response(200, {
+        'chef_type' => 'data_bag',
+        'json_class' => 'Chef::DataBag',
+        'name' => key
+      })
     end
   end
 
