@@ -67,6 +67,7 @@ class TinyChefServer < Rack::Server
         [ '/environments/*/cookbooks/*', EnvironmentCookbookEndpoint.new(data) ],
         [ '/environments/*/cookbook_versions', EnvironmentCookbookVersionsEndpoint.new(data) ],
         [ '/environments/*/nodes', EnvironmentNodesEndpoint.new(data) ],
+        [ '/environments/*/recipes', EnvironmentRecipesEndpoint.new(data) ],
         [ '/nodes', RestListEndpoint.new(data) ],
         [ '/nodes/*', RestObjectEndpoint.new(data) ],
         [ '/roles', RestListEndpoint.new(data) ],
@@ -580,24 +581,48 @@ class TinyChefServer < Rack::Server
   class CookbooksBase < RestBase
     def format_cookbooks_list(request, cookbooks_list, constraints = {}, num_versions = nil)
       results = {}
+      filter_cookbooks(cookbooks_list, constraints, num_versions) do |name, versions|
+        versions_list = versions.map do |version|
+          {
+            'url' => build_uri(request.base_uri, ['cookbooks', name, version]),
+            'version' => version
+          }
+        end
+        results[name] = {
+          'url' => build_uri(request.base_uri, ['cookbooks', name]),
+          'versions' => versions_list
+        }
+      end
+      results
+    end
+
+    def filter_cookbooks(cookbooks_list, constraints = {}, num_versions = nil)
       cookbooks_list.keys.sort.each do |name|
         constraint = Chef::VersionConstraint.new(constraints[name])
         versions = []
         cookbooks_list[name].keys.sort_by { |version| Chef::Version.new(version) }.reverse.each do |version|
           break if num_versions && versions.size >= num_versions
           if constraint.include?(version)
-            versions << {
-              'url' => build_uri(request.base_uri, ['cookbooks', name, version]),
-              'version' => version
-            }
+            versions << version
           end
         end
-        results[name] = {
-          'url' => build_uri(request.base_uri, ['cookbooks', name]),
-          'versions' => versions
-        }
+        yield [name, versions]
       end
-      results
+    end
+
+    def recipe_names(cookbook_name, cookbook)
+      result = []
+      if cookbook['recipes']
+        cookbook['recipes'].each do |recipe|
+          if recipe['path'] == "recipes/#{recipe['name']}" && recipe['name'][-3..-1] == '.rb'
+            if recipe['name'] == 'default.rb'
+              result << cookbook_name
+            end
+            result << "#{cookbook_name}::#{recipe['name'][0..-4]}"
+          end
+        end
+      end
+      result
     end
   end
 
@@ -615,21 +640,15 @@ class TinyChefServer < Rack::Server
       case filter
       when '_latest'
         result = {}
-        data['cookbooks'].each_pair do |name, versions|
-          result[name] = build_uri(request.base_uri, ['cookbooks', name, latest_version(versions.keys)])
+        filter_cookbooks(data['cookbooks'], {}, 1) do |name, versions|
+          result[name] = build_uri(request.base_uri, ['cookbooks', name, versions[0]])
         end
         json_response(200, result)
       when '_recipes'
         result = []
-        data['cookbooks'].each_pair do |name, versions|
-          latest = JSON.parse(versions[latest_version(versions.keys)], :create_additions => false)
-          if latest['recipes']
-            latest['recipes'].each do |recipe|
-              if recipe['path'] == "recipes/#{recipe['name']}" && recipe['name'][-3..-1] == '.rb'
-                result << "#{name}::#{recipe['name'][0..-4]}"
-              end
-            end
-          end
+        filter_cookbooks(data['cookbooks'], {}, 1) do |name, versions|
+          cookbook = JSON.parse(data['cookbooks'][name][versions[0]], :create_additions => false)
+          result += recipe_names(name, cookbook)
         end
         json_response(200, result.sort)
       else
@@ -899,6 +918,20 @@ class TinyChefServer < Rack::Server
         end
       end
       json_response(200, result)
+    end
+  end
+
+  # /environment/NAME/recipes
+  class EnvironmentRecipesEndpoint < CookbooksBase
+    def get(request)
+      environment = get_data(request, request.rest_path[0..1])
+      constraints = environment['cookbook_versions'] || {}
+      result = []
+      filter_cookbooks(data['cookbooks'], constraints, 1) do |name, versions|
+        cookbook = JSON.parse(data['cookbooks'][name][versions[0]], :create_additions => false)
+        result += recipe_names(cookbook_name, cookbook)
+      end
+      json_response(200, result.sort)
     end
   end
 end
