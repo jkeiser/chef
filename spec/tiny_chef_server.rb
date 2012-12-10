@@ -60,7 +60,7 @@ class TinyChefServer < Rack::Server
         [ '/cookbooks/*/*', CookbookVersionEndpoint.new(data) ],
         [ '/data', DataBagsEndpoint.new(data) ],
         [ '/data/*', DataBagEndpoint.new(data) ],
-        [ '/data/*/*', RestObjectEndpoint.new(data, 'id') ],
+        [ '/data/*/*', DataBagItemEndpoint.new(data) ],
         [ '/environments', RestListEndpoint.new(data) ],
         [ '/environments/*', EnvironmentEndpoint.new(data) ],
         [ '/environments/*/cookbooks', EnvironmentCookbooksEndpoint.new(data) ],
@@ -122,6 +122,10 @@ class TinyChefServer < Rack::Server
 
     def base_uri
       @base_uri ||= "#{env['rack.url_scheme']}://#{env['HTTP_HOST']}#{env['SCRIPT_NAME']}"
+    end
+
+    def method
+      @env['REQUEST_METHOD']
     end
 
     def rest_path
@@ -245,12 +249,12 @@ class TinyChefServer < Rack::Server
     def post(request)
       container = get_data(request)
       contents = request.body
-      name = JSON.parse(contents, :create_additions => false)[identity_key]
-      if container[name]
-        error(409, "Object already exists")
+      key = JSON.parse(contents, :create_additions => false)[identity_key]
+      if container[key]
+        error(409, 'Object already exists')
       else
-        container[name] = contents
-        json_response(201, {"uri" => "#{build_uri(request.base_uri, request.rest_path + [name])}"})
+        container[key] = contents
+        json_response(201, {'uri' => "#{build_uri(request.base_uri, request.rest_path + [key])}"})
       end
     end
   end
@@ -407,6 +411,14 @@ class TinyChefServer < Rack::Server
       super(data, 'id')
     end
 
+    def post(request)
+      key = JSON.parse(request.body, :create_additions => false)[identity_key]
+      response = super(request)
+      if response[0] == 201
+        already_json_response(201, DataBagItemEndpoint::populate_defaults(request, request.body, request.rest_path[1], key))
+      end
+    end
+
     def delete(request)
       key = request.rest_path[1]
       container = data['data']
@@ -416,6 +428,32 @@ class TinyChefServer < Rack::Server
       result = container[key]
       container.delete(key)
       already_json_response(200, result)
+    end
+  end
+
+  # /data/NAME/NAME
+  class DataBagItemEndpoint < RestObjectEndpoint
+    def initialize(data)
+      super(data, 'id')
+    end
+
+    def populate_defaults(request, response)
+      DataBagItemEndpoint::populate_defaults(request, response, request.rest_path[1], request.rest_path[2])
+    end
+
+    def self.populate_defaults(request, response, data_bag, data_bag_item)
+      response_json = JSON.parse(response, :create_additions => false)
+      # If it's not already wrapped with raw_data, wrap it.
+      if response_json['json_class'] == 'Chef::DataBagItem' && response_json['raw_data']
+        response_json = response_json['raw_data']
+      end
+      # Argh.  We don't do this on GET, but we do on PUT and POST????
+      if %w(PUT POST).include?(request.method)
+        response_json['chef_type'] ||= 'data_bag_item'
+        response_json['data_bag'] ||= data_bag
+      end
+      response_json['id'] ||= data_bag_item
+      JSON.pretty_generate(response_json)
     end
   end
 
