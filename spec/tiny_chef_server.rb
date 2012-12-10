@@ -165,6 +165,9 @@ class TinyChefServer < Rack::Server
         if !self.respond_to?(method)
           return error(405, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}")
         end
+        if !env['HTTP_ACCEPT'].split(';').include?('application/json')
+          return [406, {"Content-Type" => "text/plain"}, "Must accept application/json"]
+        end
         # Dispatch to get()/post()/put()/delete()
         begin
           self.send(method, RestRequest.new(env))
