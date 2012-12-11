@@ -75,7 +75,7 @@ class TinyChefServer < Rack::Server
         [ '/nodes/*', NodeEndpoint.new(data) ],
         [ '/principals/*', PrincipalEndpoint.new(data) ],
         [ '/roles', RestListEndpoint.new(data) ],
-        [ '/roles/*', RestObjectEndpoint.new(data) ],
+        [ '/roles/*', RoleEndpoint.new(data) ],
         [ '/sandboxes', SandboxesEndpoint.new(data) ],
         [ '/sandboxes/*', SandboxEndpoint.new(data) ],
         [ '/search', SearchesEndpoint.new(data) ],
@@ -299,7 +299,7 @@ class TinyChefServer < Rack::Server
       rename = key != request.rest_path[-1]
       if rename
         if container.has_key?(key)
-          return error(409, "Cannot rename '#{request.rest_path[0..-2]}' to '#{key}': '#{key}' already exists")
+          return error(409, "Cannot rename '#{request.rest_path[-1]}' to '#{key}': '#{key}' already exists")
         end
         container.delete(request.rest_path[-1])
         container[key] = request.body
@@ -429,6 +429,18 @@ class TinyChefServer < Rack::Server
     end
 
     def self.expand_role(role, name)
+      role['name'] ||= name
+      role['description'] ||= ''
+      role['json_class'] ||= 'Chef::Role'
+      role['chef_type'] ||= 'role'
+      role['default_attributes'] ||= {}
+      role['override_attributes'] ||= {}
+      role['run_list'] ||= []
+      role['run_list'] = normalize_run_list(role['run_list'])
+      role['env_run_lists'] ||= {}
+      role['env_run_lists'].each_pair do |env, run_list|
+        role['env_run_lists'][env] = normalize_run_list(run_list)
+      end
       role
     end
 
@@ -670,6 +682,15 @@ class TinyChefServer < Rack::Server
       else
         error(404, 'Principal not found')
       end
+    end
+  end
+
+  # /roles/ID
+  class RoleEndpoint < RestObjectEndpoint
+    def populate_defaults(request, response_json)
+      role = JSON.parse(response_json, :create_additions => false)
+      role = DataExpander.expand_role(role, request.rest_path[1])
+      JSON.pretty_generate(role)
     end
   end
 
