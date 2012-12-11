@@ -58,18 +58,18 @@ class TinyChefServer
 
     private
 
-    def search_container(index)
+    def search_container(request, index)
       case index
       when 'client'
-        [ data['clients'], 'name' ]
+        [ data['clients'], 'name', Proc.new { |client, name| DataExpander.expand_client(client, name) } ]
       when 'node'
-        [ data['nodes'], 'name' ]
+        [ data['nodes'], 'name', Proc.new { |node, name| DataExpander.expand_node(node, name) } ]
       when 'environment'
-        [ data['environments'], 'name' ]
+        [ data['environments'], 'name', Proc.new { |environment, name| DataExpander.expand_environment(environment, name) } ]
       when 'role'
-        [ data['roles'], 'name' ]
+        [ data['roles'], 'name', Proc.new { |role, name| DataExpander.expand_role(role, name) } ]
       else
-        [ data['data'][index], 'id' ]
+        [ data['data'][index], 'id', Proc.new { |data_bag_item, id| DataExpander.expand_data_bag_item(data_bag_item, index, id, 'GET') } ]
       end
     end
 
@@ -85,13 +85,16 @@ class TinyChefServer
       rows = rows.to_i if rows
 
       # Get the search container
-      container, container_id_key = search_container(index)
+      container, container_id_key, expander = search_container(request, index)
       if container.nil?
         raise RestErrorResponse.new(404, "Object not found: #{build_uri(request.base_uri, rest_path)}")
       end
 
       # Search!
-      result = container.values.map { |value| JSON.parse(value, :create_additions => false) }
+      result = []
+      container.each_pair do |name,value|
+        result << expander.call(JSON.parse(value, :create_additions => false), name)
+      end
       result = result.select { |value| solr_query.matches_doc?(SolrDoc.new(value, container_id_key)) }
       total = result.size
 

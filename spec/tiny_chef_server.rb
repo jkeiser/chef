@@ -210,6 +210,10 @@ class TinyChefServer < Rack::Server
     end
 
     def build_uri(base_uri, rest_path)
+      RestBase::build_uri(base_uri, rest_path)
+    end
+
+    def self.build_uri(base_uri, rest_path)
       "#{base_uri}/#{rest_path.join('/')}"
     end
 
@@ -325,6 +329,93 @@ class TinyChefServer < Rack::Server
     end
   end
 
+  class DataExpander
+    def self.expand_client(client, name)
+      client['name'] ||= name
+      client['admin'] ||= false
+      client['public_key'] ||= PUBLIC_KEY
+      client['validator'] ||= false
+      client['json_class'] ||= "Chef::ApiClient"
+      client['chef_type'] ||= "client"
+      client
+    end
+
+    def self.expand_user(user, name)
+      user['name'] ||= name
+      user['admin'] ||= false
+      user['public_key'] ||= PUBLIC_KEY
+      # TODO json_class, chef_type, ???
+      user
+    end
+
+    def self.expand_data_bag_item(data_bag_item, data_bag_name, id, method)
+      if method == 'DELETE'
+        # TODO SERIOUSLY, WHO DOES THIS MANY EXCEPTIONS IN THEIR INTERFACE
+        if !(data_bag_item['json_class'] == 'Chef::DataBagItem' && data_bag_item['raw_data'])
+          data_bag_item['id'] ||= id
+          data_bag_item = { 'raw_data' => data_bag_item }
+          data_bag_item['chef_type'] ||= 'data_bag_item'
+          data_bag_item['json_class'] ||= 'Chef::DataBagItem'
+          data_bag_item['data_bag'] ||= data_bag_name
+          data_bag_item['name'] ||= "data_bag_item_#{data_bag_name}_#{id}"
+        end
+      else
+        # If it's not already wrapped with raw_data, wrap it.
+        if data_bag_item['json_class'] == 'Chef::DataBagItem' && data_bag_item['raw_data']
+          data_bag_item = data_bag_item['raw_data']
+        end
+        # Argh.  We don't do this on GET, but we do on PUT and POST????
+        if %w(PUT POST).include?(method)
+          data_bag_item['chef_type'] ||= 'data_bag_item'
+          data_bag_item['data_bag'] ||= data_bag_name
+        end
+        data_bag_item['id'] ||= id
+      end
+      data_bag_item
+    end
+
+    def self.expand_environment(environment, name)
+      environment['name'] ||= name
+      environment['description'] ||= ''
+      environment['cookbook_versions'] ||= {}
+      environment['json_class'] ||= "Chef::Environment"
+      environment['chef_type'] ||= "environment"
+      environment['default_attributes'] ||= {}
+      environment['override_attributes'] ||= {}
+      environment
+    end
+
+    def self.expand_cookbook(cookbook, name, version, base_uri)
+      cookbook.each_pair do |key, value|
+        if value.is_a?(Array)
+          value.each do |file|
+            if file.is_a?(Hash) && file.has_key?('checksum')
+              file['url'] ||= RestBase::build_uri(base_uri, ['file_store', file['checksum']])
+            end
+          end
+        end
+      end
+      cookbook['name'] ||= "#{name}-#{version}"
+      cookbook['version'] ||= version
+      cookbook['cookbook_name'] ||= name
+      cookbook['json_class'] ||= 'Chef::CookbookVersion'
+      cookbook['chef_type'] ||= 'cookbook_version'
+      cookbook['frozen?'] ||= false
+      cookbook['metadata'] ||= {}
+      cookbook['metadata']['version'] ||= version
+      cookbook['metadata']['name'] ||= name
+      cookbook
+    end
+
+    def self.expand_node(node, name)
+      node
+    end
+
+    def self.expand_role(role, name)
+      role
+    end
+  end
+
   # /authenticate_user
   class AuthenticateUserEndpoint < RestBase
     def post(request)
@@ -382,17 +473,14 @@ class TinyChefServer < Rack::Server
       end
     end
 
-    def populate_defaults(request, response)
-      response_json = JSON.parse(response, :create_additions => false)
-      response_json['name'] ||= request.rest_path[-1]
-      response_json['admin'] ||= false
-      response_json['public_key'] ||= PUBLIC_KEY
+    def populate_defaults(request, response_json)
+      response = JSON.parse(response_json, :create_additions => false)
       if request.rest_path[0] == 'clients'
-        response_json['validator'] ||= false
-        response_json['json_class'] ||= "Chef::ApiClient"
-        response_json['chef_type'] ||= "client"
+        response = DataExpander.expand_client(response, request.rest_path[1])
+      else
+        response = DataExpander.expand_user(response, request.rest_path[1])
       end
-      JSON.pretty_generate(response_json)
+      JSON.pretty_generate(response)
     end
   end
 
@@ -449,34 +537,14 @@ class TinyChefServer < Rack::Server
       super(data, 'id')
     end
 
-    def populate_defaults(request, response)
-      DataBagItemEndpoint::populate_defaults(request, response, request.rest_path[1], request.rest_path[2])
+    def populate_defaults(request, response_json)
+      DataBagItemEndpoint::populate_defaults(request, response_json, request.rest_path[1], request.rest_path[2])
     end
 
-    def self.populate_defaults(request, response, data_bag, data_bag_item)
-      response_json = JSON.parse(response, :create_additions => false)
-      if request.method == 'DELETE'
-        # TODO SERIOUSLY, WHO DOES THIS MANY EXCEPTIONS IN THEIR INTERFACE
-        if !(response_json['json_class'] == 'Chef::DataBagItem' && response_json['raw_data'])
-          response_json = { 'raw_data' => response_json }
-          response_json['chef_type'] ||= 'data_bag_item'
-          response_json['json_class'] ||= 'Chef::DataBagItem'
-          response_json['data_bag'] ||= data_bag
-          response_json['name'] ||= "data_bag_item_#{data_bag}_#{data_bag_item}"
-        end
-      else
-        # If it's not already wrapped with raw_data, wrap it.
-        if response_json['json_class'] == 'Chef::DataBagItem' && response_json['raw_data']
-          response_json = response_json['raw_data']
-        end
-        # Argh.  We don't do this on GET, but we do on PUT and POST????
-        if %w(PUT POST).include?(request.method)
-          response_json['chef_type'] ||= 'data_bag_item'
-          response_json['data_bag'] ||= data_bag
-        end
-        response_json['id'] ||= data_bag_item
-      end
-      JSON.pretty_generate(response_json)
+    def self.populate_defaults(request, response_json, data_bag, data_bag_item)
+      response = JSON.parse(response_json, :create_additions => false)
+      response = DataExpander.expand_data_bag_item(response, data_bag, data_bag_item, request.method)
+      JSON.pretty_generate(response)
     end
   end
 
@@ -500,16 +568,10 @@ class TinyChefServer < Rack::Server
       end
     end
 
-    def populate_defaults(request, response)
-      response_json = JSON.parse(response, :create_additions => false)
-      response_json['name'] ||= request.rest_path[-1]
-      response_json['description'] ||= ''
-      response_json['cookbook_versions'] ||= {}
-      response_json['json_class'] ||= "Chef::Environment"
-      response_json['chef_type'] ||= "environment"
-      response_json['default_attributes'] ||= {}
-      response_json['override_attributes'] ||= {}
-      JSON.pretty_generate(response_json)
+    def populate_defaults(request, response_json)
+      response = JSON.parse(response_json, :create_additions => false)
+      response = DataExpander.expand_environment(response, request.rest_path[1])
+      JSON.pretty_generate(response)
     end
   end
 
@@ -745,27 +807,10 @@ class TinyChefServer < Rack::Server
       end
     end
 
-    def populate_defaults(request, response)
+    def populate_defaults(request, response_json)
       # Inject URIs into each cookbook file
-      cookbook = JSON.parse(response, :create_additions => false)
-      cookbook.each_pair do |key, value|
-        if value.is_a?(Array)
-          value.each do |file|
-            if file.is_a?(Hash) && file.has_key?('checksum')
-              file['url'] ||= build_uri(request.base_uri, ['file_store', file['checksum']])
-            end
-          end
-        end
-      end
-      cookbook['name'] ||= "#{request.rest_path[-2]}-#{request.rest_path[-1]}"
-      cookbook['version'] ||= request.rest_path[-1]
-      cookbook['cookbook_name'] ||= request.rest_path[-2]
-      cookbook['json_class'] ||= 'Chef::CookbookVersion'
-      cookbook['chef_type'] ||= 'cookbook_version'
-      cookbook['frozen?'] ||= false
-      cookbook['metadata'] ||= {}
-      cookbook['metadata']['version'] ||= request.rest_path[-1]
-      cookbook['metadata']['name'] ||= request.rest_path[-2]
+      cookbook = JSON.parse(response_json, :create_additions => false)
+      cookbook = DataExpander.expand_cookbook(cookbook, request.rest_path[1], request.rest_path[2], request.base_uri)
       JSON.pretty_generate(cookbook)
     end
 
