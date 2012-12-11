@@ -712,14 +712,18 @@ class TinyChefServer < Rack::Server
       when '_latest'
         result = {}
         filter_cookbooks(data['cookbooks'], {}, 1) do |name, versions|
-          result[name] = build_uri(request.base_uri, ['cookbooks', name, versions[0]])
+          if versions.size > 0
+            result[name] = build_uri(request.base_uri, ['cookbooks', name, versions[0]])
+          end
         end
         json_response(200, result)
       when '_recipes'
         result = []
         filter_cookbooks(data['cookbooks'], {}, 1) do |name, versions|
-          cookbook = JSON.parse(data['cookbooks'][name][versions[0]], :create_additions => false)
-          result += recipe_names(name, cookbook)
+          if versions.size > 0
+            cookbook = JSON.parse(data['cookbooks'][name][versions[0]], :create_additions => false)
+            result += recipe_names(name, cookbook)
+          end
         end
         json_response(200, result.sort)
       else
@@ -978,12 +982,15 @@ class TinyChefServer < Rack::Server
   # /environment/NAME/recipes
   class EnvironmentRecipesEndpoint < CookbooksBase
     def get(request)
-      environment = get_data(request, request.rest_path[0..1])
+      environment = JSON.parse(get_data(request, request.rest_path[0..1]), :create_additions => false)
       constraints = environment['cookbook_versions'] || {}
       result = []
+      puts constraints
       filter_cookbooks(data['cookbooks'], constraints, 1) do |name, versions|
-        cookbook = JSON.parse(data['cookbooks'][name][versions[0]], :create_additions => false)
-        result += recipe_names(cookbook_name, cookbook)
+        if versions.size > 0
+          cookbook = JSON.parse(data['cookbooks'][name][versions[0]], :create_additions => false)
+          result += recipe_names(name, cookbook)
+        end
       end
       json_response(200, result.sort)
     end
@@ -992,8 +999,9 @@ class TinyChefServer < Rack::Server
   # /environment/NAME/roles/NAME
   class EnvironmentRoleEndpoint < CookbooksBase
     def get(request)
-      # Check for environment existence
-      environment = get_data(request, request.rest_path[0..1])
+      # 404 if environment does not exist
+      get_data(request, request.rest_path[0..1])
+
       role = JSON.parse(get_data(request, request.rest_path[2..3]), :create_additions => false)
       environment_name = request.rest_path[1]
       if environment_name == '_default'
