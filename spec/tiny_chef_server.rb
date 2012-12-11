@@ -43,7 +43,9 @@ class TinyChefServer < Rack::Server
       'nodes' => {},
       'roles' => {},
       'sandboxes' => {},
-      'users' => {}
+      'users' => {
+        'admin' => '{ "admin": true }'
+      }
     }
   end
 
@@ -71,6 +73,7 @@ class TinyChefServer < Rack::Server
         [ '/environments/*/roles/*', EnvironmentRoleEndpoint.new(data) ],
         [ '/nodes', RestListEndpoint.new(data) ],
         [ '/nodes/*', NodeEndpoint.new(data) ],
+        [ '/principals/*', PrincipalEndpoint.new(data) ],
         [ '/roles', RestListEndpoint.new(data) ],
         [ '/roles/*', RestObjectEndpoint.new(data) ],
         [ '/sandboxes', SandboxesEndpoint.new(data) ],
@@ -644,6 +647,29 @@ class TinyChefServer < Rack::Server
       node = JSON.parse(response_json, :create_additions => false)
       node = DataExpander.expand_node(node, request.rest_path[1])
       JSON.pretty_generate(node)
+    end
+  end
+
+  # /principals/NAME
+  class PrincipalEndpoint < RestBase
+    def get(request)
+      name = request.rest_path[-1]
+      json = data['users'][name]
+      if json
+        type = 'user'
+      else
+        json = data['clients'][name]
+        type = 'client'
+      end
+      if json
+        json_response(200, {
+          'name' => name,
+          'type' => type,
+          'public_key' => JSON.parse(json)['public_key'] || PUBLIC_KEY
+        })
+      else
+        error(404, 'Principal not found')
+      end
     end
   end
 
