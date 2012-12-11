@@ -70,7 +70,7 @@ class TinyChefServer < Rack::Server
         [ '/environments/*/recipes', EnvironmentRecipesEndpoint.new(data) ],
         [ '/environments/*/roles/*', EnvironmentRoleEndpoint.new(data) ],
         [ '/nodes', RestListEndpoint.new(data) ],
-        [ '/nodes/*', RestObjectEndpoint.new(data) ],
+        [ '/nodes/*', NodeEndpoint.new(data) ],
         [ '/roles', RestListEndpoint.new(data) ],
         [ '/roles/*', RestObjectEndpoint.new(data) ],
         [ '/sandboxes', SandboxesEndpoint.new(data) ],
@@ -412,11 +412,34 @@ class TinyChefServer < Rack::Server
     end
 
     def self.expand_node(node, name)
+      node['name'] ||= name
+      node['json_class'] ||= 'Chef::Node'
+      node['chef_type'] ||= 'node'
+      node['chef_environment'] ||= '_default'
+      node['override'] ||= {}
+      node['normal'] ||= {}
+      node['default'] ||= {}
+      node['automatic'] ||= {}
+      node['run_list'] ||= []
+      node['run_list'] = normalize_run_list(node['run_list'])
       node
     end
 
     def self.expand_role(role, name)
       role
+    end
+
+    def self.normalize_run_list(run_list)
+      run_list.map{|item|
+        case item
+        when /^recipe\[.*\]$/
+          item # explicit recipe
+        when /^role\[.*\]$/
+          item # explicit role
+        else
+          "recipe[#{item}]"
+        end
+      }.uniq
     end
   end
 
@@ -565,8 +588,7 @@ class TinyChefServer < Rack::Server
 
     def put(request)
       if request.rest_path[1] == "_default"
-        # 404, 405 ... can we *decide* on an error code, please?
-        error(404, "The '_default' environment cannot be modified.")
+        error(405, "The '_default' environment cannot be modified.")
       else
         super(request)
       end
@@ -613,6 +635,15 @@ class TinyChefServer < Rack::Server
         :checksums => result_checksums,
         :sandbox_id => id
       })
+    end
+  end
+
+  # /nodes/ID
+  class NodeEndpoint < RestObjectEndpoint
+    def populate_defaults(request, response_json)
+      node = JSON.parse(response_json, :create_additions => false)
+      node = DataExpander.expand_node(node, request.rest_path[1])
+      JSON.pretty_generate(node)
     end
   end
 
