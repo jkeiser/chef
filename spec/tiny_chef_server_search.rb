@@ -168,7 +168,7 @@ class TinyChefServer
           end
         end
       elsif value.is_a?(Array)
-        value.each do |child|
+        value.each do |child_value|
           key_values(key_so_far, child_value, &block)
         end
       else
