@@ -22,8 +22,9 @@ class TinyChefServer
     def get(request)
       # Get the result
       result_hash = {}
-      %w(client environment node role).each do |index|
-        result_hash[index] = build_uri(request.base_uri, request.rest_path + ['index'])
+      indices = (%w(client environment node role) + data['data'].keys).sort
+      indices.each do |index|
+        result_hash[index] = build_uri(request.base_uri, request.rest_path + [index])
       end
       json_response(200, result_hash)
     end
