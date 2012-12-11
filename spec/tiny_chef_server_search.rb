@@ -36,14 +36,14 @@ class TinyChefServer
   class SearchEndpoint < RestBase
     def get(request)
       results = search(request)
-      results['rows'] = results['rows'].map { |uri,value| value }
+      results['rows'] = results['rows'].map { |name,uri,value,search_value| value }
       json_response(200, results)
     end
 
     def post(request)
       full_results = search(request)
       keys = JSON.parse(request.body, :create_additions => false)
-      partial_results = full_results['rows'].map do |uri, doc, search_value|
+      partial_results = full_results['rows'].map do |name, uri, doc, search_value|
         data = {}
         keys.each_pair do |key, path|
           if path.size > 0
@@ -73,19 +73,19 @@ class TinyChefServer
     def search_container(request, index)
       case index
       when 'client'
-        [ data['clients'], 'name', Proc.new { |client, name| DataExpander.expand_client(client, name) }, build_uri(request.base_uri, [ 'clients' ]) ]
+        [ data['clients'], Proc.new { |client, name| DataExpander.expand_client(client, name) }, build_uri(request.base_uri, [ 'clients' ]) ]
       when 'node'
-        [ data['nodes'], 'name', Proc.new { |node, name| DataExpander.expand_node(node, name) }, build_uri(request.base_uri, [ 'nodes' ]) ]
+        [ data['nodes'], Proc.new { |node, name| DataExpander.expand_node(node, name) }, build_uri(request.base_uri, [ 'nodes' ]) ]
       when 'environment'
-        [ data['environments'], 'name', Proc.new { |environment, name| DataExpander.expand_environment(environment, name) }, build_uri(request.base_uri, [ 'environments' ]) ]
+        [ data['environments'], Proc.new { |environment, name| DataExpander.expand_environment(environment, name) }, build_uri(request.base_uri, [ 'environments' ]) ]
       when 'role'
-        [ data['roles'], 'name', Proc.new { |role, name| DataExpander.expand_role(role, name) }, build_uri(request.base_uri, [ 'roles' ]) ]
+        [ data['roles'], Proc.new { |role, name| DataExpander.expand_role(role, name) }, build_uri(request.base_uri, [ 'roles' ]) ]
       else
-        [ data['data'][index], 'id', Proc.new { |data_bag_item, id| DataExpander.expand_data_bag_item(data_bag_item, index, id, 'GET') }, build_uri(request.base_uri, [ 'data', index ]) ]
+        [ data['data'][index], Proc.new { |data_bag_item, id| DataExpander.expand_data_bag_item(data_bag_item, index, id, 'DELETE') }, build_uri(request.base_uri, [ 'data', index ]) ]
       end
     end
 
-    def with_special_attributes(value, index)
+    def expand_for_indexing(value, index, id)
       if index == 'node'
         result = {}
         Chef::Mixin::DeepMerge.deep_merge!(value['default'] || {}, result)
@@ -106,6 +106,8 @@ class TinyChefServer
         end
         result
 
+      elsif !%w(client environment role).include?(index)
+        DataExpander.expand_data_bag_item(value, index, id, 'GET')
       else
         value
       end
@@ -123,26 +125,26 @@ class TinyChefServer
       rows = rows.to_i if rows
 
       # Get the search container
-      container, container_id_key, expander, base_uri = search_container(request, index)
+      container, expander, base_uri = search_container(request, index)
       if container.nil?
-        raise RestErrorResponse.new(404, "Object not found: #{build_uri(request.base_uri, rest_path)}")
+        raise RestErrorResponse.new(404, "Object not found: #{build_uri(request.base_uri, request.rest_path)}")
       end
 
       # Search!
       result = []
       container.each_pair do |name,value|
         expanded = expander.call(JSON.parse(value, :create_additions => false), name)
-        result << [ build_uri(base_uri, [name]), expanded, with_special_attributes(expanded, index) ]
+        result << [ name, build_uri(base_uri, [name]), expanded, expand_for_indexing(expanded, index, name) ]
       end
-      result = result.select do |uri, value, search_value|
-        solr_query.matches_doc?(SolrDoc.new(search_value, container_id_key))
+      result = result.select do |name, uri, value, search_value|
+        solr_query.matches_doc?(SolrDoc.new(search_value, name))
       end
       total = result.size
 
       # Sort
       if sort_string
         sort_key, sort_order = sort_string.split(/\s+/, 2)
-        result = result.sort_by { |uri,value,search_value| SolrDoc.new(search_value, container_id_key)[sort_key] }
+        result = result.sort_by { |name,uri,value,search_value| SolrDoc.new(search_value, name)[sort_key] }
         result = result.reverse if sort_order == "DESC"
       end
 
@@ -161,9 +163,9 @@ class TinyChefServer
   # This does what expander does, flattening the json doc into keys and values
   # so that solr can search them.
   class SolrDoc
-    def initialize(json, id_key)
+    def initialize(json, id)
       @json = json
-      @id_key = id_key
+      @id = id
     end
 
     def [](key)
@@ -185,9 +187,9 @@ class TinyChefServer
       # Handle manufactured value(s)
       if block.call('X_CHEF_id_CHEF_X')
         if result.has_key?('X_CHEF_id_CHEF_X')
-          result['X_CHEF_id_CHEF_X'] << @json[@id_key]
+          result['X_CHEF_id_CHEF_X'] << @id.to_s
         else
-          result['X_CHEF_id_CHEF_X'] = @json[@id_key].clone
+          result['X_CHEF_id_CHEF_X'] = @id.to_s.clone
         end
       end
 
