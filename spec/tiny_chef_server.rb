@@ -168,7 +168,7 @@ class TinyChefServer < Rack::Server
         if !self.respond_to?(method)
           return error(405, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}")
         end
-        if !env['HTTP_ACCEPT'].split(';').include?('application/json')
+        if json_only && !env['HTTP_ACCEPT'].split(';').include?('application/json')
           return [406, {"Content-Type" => "text/plain"}, "Must accept application/json"]
         end
         # Dispatch to get()/post()/put()/delete()
@@ -182,6 +182,10 @@ class TinyChefServer < Rack::Server
         puts $!.backtrace
         raise
       end
+    end
+
+    def json_only
+      true
     end
 
     def get_data(request, rest_path=nil)
@@ -630,6 +634,10 @@ class TinyChefServer < Rack::Server
   # The minimum amount of S3 necessary to support cookbook upload/download
   # /file_store/FILE
   class FileStoreFileEndpoint < RestBase
+    def json_only
+      false
+    end
+
     def get(request)
       [200, {"Content-Type" => 'application/x-binary'}, get_data(request) ]
     end
