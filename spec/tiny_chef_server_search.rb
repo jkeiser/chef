@@ -406,7 +406,7 @@ class TinyChefServer
       def initialize(regexp_string, literal_string)
         @regexp_string = regexp_string
         # Surround the regexp with word boundaries
-        @regexp = Regexp.new("(^|\\W)#{regexp_string}($|\\W)", true)
+        @regexp = Regexp.new("(^|#{NON_WORD_CHARACTER})#{regexp_string}($|#{NON_WORD_CHARACTER})", true)
         @literal_string = literal_string
       end
 
@@ -421,6 +421,9 @@ class TinyChefServer
       def matches_values?(values)
         values.any? { |value| !@regexp.match(value).nil? }
       end
+
+      WORD_CHARACTER = "[A-Za-z0-9@._':]"
+      NON_WORD_CHARACTER = "[^A-Za-z0-9@._':]"
     end
 
     class Term < RegexpableQuery
@@ -432,11 +435,11 @@ class TinyChefServer
         index = 0
         while index < term.length
           if term[index] == '*'
-            regexp_string << '\w*'
+            regexp_string << "#{WORD_CHARACTER}*"
             literal_string = nil
             index += 1
           elsif term[index] == '?'
-            regexp_string << '\w'
+            regexp_string << WORD_CHARACTER
             literal_string = nil
             index += 1
           elsif term[index] == '~'
@@ -469,7 +472,7 @@ class TinyChefServer
         else
           literal_string = nil
         end
-        super(terms.map { |term| term.regexp_string }.join('\W+'), literal_string)
+        super(terms.map { |term| term.regexp_string }.join("#{NON_WORD_CHARACTER}+"), literal_string)
       end
 
       def to_s
