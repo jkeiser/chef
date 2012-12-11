@@ -16,6 +16,8 @@
 # limitations under the License.
 #
 
+require 'chef/mixin/deep_merge'
+
 class TinyChefServer
   # /search
   class SearchesEndpoint < RestBase
@@ -41,11 +43,11 @@ class TinyChefServer
     def post(request)
       full_results = search(request)
       keys = JSON.parse(request.body, :create_additions => false)
-      partial_results = full_results['rows'].map do |uri, full_result|
+      partial_results = full_results['rows'].map do |uri, doc, search_value|
         data = {}
         keys.each_pair do |key, path|
           if path.size > 0
-            value = full_result
+            value = search_value
             path.each do |path_part|
               value = value[path_part] if !value.nil?
             end
@@ -85,7 +87,13 @@ class TinyChefServer
 
     def with_special_attributes(value, index)
       if index == 'node'
-        result = { 'recipe' => [], 'role' => [] }
+        result = {}
+        Chef::Mixin::DeepMerge.deep_merge!(value['default'] || {}, result)
+        Chef::Mixin::DeepMerge.deep_merge!(value['normal'] || {}, result)
+        Chef::Mixin::DeepMerge.deep_merge!(value['override'] || {}, result)
+        Chef::Mixin::DeepMerge.deep_merge!(value['automatic'] || {}, result)
+        result['recipe'] = []
+        result['role'] = []
         if value['run_list']
           value['run_list'].each do |run_list_entry|
             if run_list_entry =~ /^(recipe|role)\[(.*)\]/
@@ -93,7 +101,11 @@ class TinyChefServer
             end
           end
         end
-        value.merge(result)
+        value.each_pair do |key, value|
+          result[key] = value unless %w(default normal override automatic).include?(key)
+        end
+        result
+
       else
         value
       end
@@ -119,18 +131,18 @@ class TinyChefServer
       # Search!
       result = []
       container.each_pair do |name,value|
-        result << [ build_uri(base_uri, [name]), expander.call(JSON.parse(value, :create_additions => false), name) ]
+        expanded = expander.call(JSON.parse(value, :create_additions => false), name)
+        result << [ build_uri(base_uri, [name]), expanded, with_special_attributes(expanded, index) ]
       end
-      result = result.select do |uri, value|
-        fully_expanded = with_special_attributes(value, index)
-        solr_query.matches_doc?(SolrDoc.new(fully_expanded, container_id_key))
+      result = result.select do |uri, value, search_value|
+        solr_query.matches_doc?(SolrDoc.new(search_value, container_id_key))
       end
       total = result.size
 
       # Sort
       if sort_string
         sort_key, sort_order = sort_string.split(/\s+/, 2)
-        result = result.sort_by { |uri,value| SolrDoc.new(value, container_id_key)[sort_key] }
+        result = result.sort_by { |uri,value,search_value| SolrDoc.new(search_value, container_id_key)[sort_key] }
         result = result.reverse if sort_order == "DESC"
       end
 
