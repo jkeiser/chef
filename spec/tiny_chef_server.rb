@@ -697,7 +697,7 @@ class TinyChefServer < Rack::Server
   end
 
   # /roles/NAME/environments
-  class RoleEnvironmentsEndpoint < RestObjectEndpoint
+  class RoleEnvironmentsEndpoint < RestBase
     def get(request)
       role = JSON.parse(get_data(request, request.rest_path[0..1]), :create_additions => false)
       json_response(200, [ '_default' ] + (role['env_run_lists'].keys || []))
