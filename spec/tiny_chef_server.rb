@@ -76,6 +76,8 @@ class TinyChefServer < Rack::Server
         [ '/principals/*', PrincipalEndpoint.new(data) ],
         [ '/roles', RestListEndpoint.new(data) ],
         [ '/roles/*', RoleEndpoint.new(data) ],
+        [ '/roles/*/environments', RoleEnvironmentsEndpoint.new(data) ],
+        [ '/roles/*/environments/*', EnvironmentRoleEndpoint.new(data) ],
         [ '/sandboxes', SandboxesEndpoint.new(data) ],
         [ '/sandboxes/*', SandboxEndpoint.new(data) ],
         [ '/search', SearchesEndpoint.new(data) ],
@@ -685,12 +687,20 @@ class TinyChefServer < Rack::Server
     end
   end
 
-  # /roles/ID
+  # /roles/NAME
   class RoleEndpoint < RestObjectEndpoint
     def populate_defaults(request, response_json)
       role = JSON.parse(response_json, :create_additions => false)
       role = DataExpander.expand_role(role, request.rest_path[1])
       JSON.pretty_generate(role)
+    end
+  end
+
+  # /roles/NAME/environments
+  class RoleEnvironmentsEndpoint < RestObjectEndpoint
+    def get(request)
+      role = JSON.parse(get_data(request, request.rest_path[0..1]), :create_additions => false)
+      json_response(200, [ '_default' ] + (role['env_run_lists'].keys || []))
     end
   end
 
@@ -1081,22 +1091,31 @@ class TinyChefServer < Rack::Server
     end
   end
 
-  # /environment/NAME/roles/NAME
+  # /environments/NAME/roles/NAME
+  # /roles/NAME/environments/NAME
   class EnvironmentRoleEndpoint < CookbooksBase
     def get(request)
       # 404 if environment does not exist
-      get_data(request, request.rest_path[0..1])
+      if request.rest_path[0] == 'environments'
+        environment_path = request.rest_path[0..1]
+        role_path = request.rest_path[2..3]
+      else
+        environment_path = request.rest_path[2..3]
+        role_path = request.rest_path[0..1]
+      end
+      get_data(request, environment_path)
 
-      role = JSON.parse(get_data(request, request.rest_path[2..3]), :create_additions => false)
-      environment_name = request.rest_path[1]
+      role = JSON.parse(get_data(request, role_path), :create_additions => false)
+      environment_name = environment_path[1]
       if environment_name == '_default'
         run_list = role['run_list']
       else
         if role['env_run_lists']
           run_list = role['env_run_lists'][environment_name]
+        else
+          run_list = nil
         end
       end
-      run_list ||= []
       json_response(200, { 'run_list' => run_list })
     end
   end
