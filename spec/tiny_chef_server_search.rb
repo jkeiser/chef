@@ -76,7 +76,7 @@ class TinyChefServer
     def search(request)
       # Extract parameters
       index = request.rest_path[1]
-      query_string = request.query_params['q']
+      query_string = request.query_params['q'] || '*:*'
       solr_query = SolrParser.new(query_string).parse
       sort_string = request.query_params['sort']
       start = request.query_params['start']
