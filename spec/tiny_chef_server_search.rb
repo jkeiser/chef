@@ -83,6 +83,22 @@ class TinyChefServer
       end
     end
 
+    def with_special_attributes(value, index)
+      if index == 'node'
+        result = { 'recipe' => [], 'role' => [] }
+        if value['run_list']
+          value['run_list'].each do |run_list_entry|
+            if run_list_entry =~ /^(recipe|role)\[(.*)\]/
+              result[$1] << $2
+            end
+          end
+        end
+        value.merge(result)
+      else
+        value
+      end
+    end
+
     def search(request)
       # Extract parameters
       index = request.rest_path[1]
@@ -105,7 +121,10 @@ class TinyChefServer
       container.each_pair do |name,value|
         result << [ build_uri(base_uri, [name]), expander.call(JSON.parse(value, :create_additions => false), name) ]
       end
-      result = result.select { |uri, value| solr_query.matches_doc?(SolrDoc.new(value, container_id_key)) }
+      result = result.select do |uri, value|
+        fully_expanded = with_special_attributes(value, index)
+        solr_query.matches_doc?(SolrDoc.new(fully_expanded, container_id_key))
+      end
       total = result.size
 
       # Sort
