@@ -110,7 +110,7 @@ class TinyChefServer < Rack::Server
     attr_accessor :not_found
 
     def call(env)
-      puts "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+      puts "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}#{env['QUERY_STRING'] != '' ? "?" + env['QUERY_STRING'] : ''}"
       clean_path = "/" + env['PATH_INFO'].split('/').select { |part| part != "" }.join("/")
       routes.each do |route, endpoint|
         if route.match(clean_path)
