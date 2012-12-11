@@ -33,22 +33,31 @@ class TinyChefServer
   # /search/INDEX
   class SearchEndpoint < RestBase
     def get(request)
-      json_response(200, search(request))
+      results = search(request)
+      results['rows'] = results['rows'].map { |uri,value| value }
+      json_response(200, results)
     end
 
     def post(request)
       full_results = search(request)
       keys = JSON.parse(request.body, :create_additions => false)
-      partial_results = full_results['rows'].map do |full_result|
-        result = {}
+      partial_results = full_results['rows'].map do |uri, full_result|
+        data = {}
         keys.each_pair do |key, path|
-          value = full_result
-          path.each do |path_part|
-            value = value[path] if !value.nil?
+          if path.size > 0
+            value = full_result
+            path.each do |path_part|
+              value = value[path_part] if !value.nil?
+            end
+            data[key] = value
+          else
+            data[key] = nil
           end
-          result[key] = value
         end
-        result
+        {
+          'url' => uri,
+          'data' => data
+        }
       end
       json_response(200, {
         'rows' => partial_results,
@@ -62,15 +71,15 @@ class TinyChefServer
     def search_container(request, index)
       case index
       when 'client'
-        [ data['clients'], 'name', Proc.new { |client, name| DataExpander.expand_client(client, name) } ]
+        [ data['clients'], 'name', Proc.new { |client, name| DataExpander.expand_client(client, name) }, build_uri(request.base_uri, [ 'clients' ]) ]
       when 'node'
-        [ data['nodes'], 'name', Proc.new { |node, name| DataExpander.expand_node(node, name) } ]
+        [ data['nodes'], 'name', Proc.new { |node, name| DataExpander.expand_node(node, name) }, build_uri(request.base_uri, [ 'nodes' ]) ]
       when 'environment'
-        [ data['environments'], 'name', Proc.new { |environment, name| DataExpander.expand_environment(environment, name) } ]
+        [ data['environments'], 'name', Proc.new { |environment, name| DataExpander.expand_environment(environment, name) }, build_uri(request.base_uri, [ 'environments' ]) ]
       when 'role'
-        [ data['roles'], 'name', Proc.new { |role, name| DataExpander.expand_role(role, name) } ]
+        [ data['roles'], 'name', Proc.new { |role, name| DataExpander.expand_role(role, name) }, build_uri(request.base_uri, [ 'roles' ]) ]
       else
-        [ data['data'][index], 'id', Proc.new { |data_bag_item, id| DataExpander.expand_data_bag_item(data_bag_item, index, id, 'GET') } ]
+        [ data['data'][index], 'id', Proc.new { |data_bag_item, id| DataExpander.expand_data_bag_item(data_bag_item, index, id, 'GET') }, build_uri(request.base_uri, [ 'data', index ]) ]
       end
     end
 
@@ -86,7 +95,7 @@ class TinyChefServer
       rows = rows.to_i if rows
 
       # Get the search container
-      container, container_id_key, expander = search_container(request, index)
+      container, container_id_key, expander, base_uri = search_container(request, index)
       if container.nil?
         raise RestErrorResponse.new(404, "Object not found: #{build_uri(request.base_uri, rest_path)}")
       end
@@ -94,15 +103,15 @@ class TinyChefServer
       # Search!
       result = []
       container.each_pair do |name,value|
-        result << expander.call(JSON.parse(value, :create_additions => false), name)
+        result << [ build_uri(base_uri, [name]), expander.call(JSON.parse(value, :create_additions => false), name) ]
       end
-      result = result.select { |value| solr_query.matches_doc?(SolrDoc.new(value, container_id_key)) }
+      result = result.select { |uri, value| solr_query.matches_doc?(SolrDoc.new(value, container_id_key)) }
       total = result.size
 
       # Sort
       if sort_string
         sort_key, sort_order = sort_string.split(/\s+/, 2)
-        result = result.sort_by { |value| SolrDoc.new(value, container_id_key)[sort_key] }
+        result = result.sort_by { |uri,value| SolrDoc.new(value, container_id_key)[sort_key] }
         result = result.reverse if sort_order == "DESC"
       end
 
