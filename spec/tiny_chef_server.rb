@@ -29,7 +29,9 @@ class TinyChefServer < Rack::Server
   def initialize(options)
     options[:host] ||= "localhost" # TODO 0.0.0.0?
     options[:port] ||= 80
+    options[:generate_real_keys] = true if !options.has_key?(:generate_real_keys)
     super(options)
+    @generate_real_keys = options[:generate_real_keys]
     @data = {
       'clients' => {
         'chef-validator' => '{ "validator": true }',
@@ -51,42 +53,43 @@ class TinyChefServer < Rack::Server
   end
 
   attr_reader :data
+  attr_reader :generate_real_keys
 
   def app
     @app ||= begin
       router = Router.new([
-        [ '/authenticate_user', AuthenticateUserEndpoint.new(data) ],
-        [ '/clients', ActorsEndpoint.new(data) ],
-        [ '/clients/*', ActorEndpoint.new(data) ],
-        [ '/cookbooks', CookbooksEndpoint.new(data) ],
-        [ '/cookbooks/*', CookbookEndpoint.new(data) ],
-        [ '/cookbooks/*/*', CookbookVersionEndpoint.new(data) ],
-        [ '/data', DataBagsEndpoint.new(data) ],
-        [ '/data/*', DataBagEndpoint.new(data) ],
-        [ '/data/*/*', DataBagItemEndpoint.new(data) ],
-        [ '/environments', RestListEndpoint.new(data) ],
-        [ '/environments/*', EnvironmentEndpoint.new(data) ],
-        [ '/environments/*/cookbooks', EnvironmentCookbooksEndpoint.new(data) ],
-        [ '/environments/*/cookbooks/*', EnvironmentCookbookEndpoint.new(data) ],
-        [ '/environments/*/cookbook_versions', EnvironmentCookbookVersionsEndpoint.new(data) ],
-        [ '/environments/*/nodes', EnvironmentNodesEndpoint.new(data) ],
-        [ '/environments/*/recipes', EnvironmentRecipesEndpoint.new(data) ],
-        [ '/environments/*/roles/*', EnvironmentRoleEndpoint.new(data) ],
-        [ '/nodes', RestListEndpoint.new(data) ],
-        [ '/nodes/*', NodeEndpoint.new(data) ],
-        [ '/principals/*', PrincipalEndpoint.new(data) ],
-        [ '/roles', RestListEndpoint.new(data) ],
-        [ '/roles/*', RoleEndpoint.new(data) ],
-        [ '/roles/*/environments', RoleEnvironmentsEndpoint.new(data) ],
-        [ '/roles/*/environments/*', EnvironmentRoleEndpoint.new(data) ],
-        [ '/sandboxes', SandboxesEndpoint.new(data) ],
-        [ '/sandboxes/*', SandboxEndpoint.new(data) ],
-        [ '/search', SearchesEndpoint.new(data) ],
-        [ '/search/*', SearchEndpoint.new(data) ],
-        [ '/users', ActorsEndpoint.new(data) ],
-        [ '/users/*', ActorEndpoint.new(data) ],
+        [ '/authenticate_user', AuthenticateUserEndpoint.new(self) ],
+        [ '/clients', ActorsEndpoint.new(self) ],
+        [ '/clients/*', ActorEndpoint.new(self) ],
+        [ '/cookbooks', CookbooksEndpoint.new(self) ],
+        [ '/cookbooks/*', CookbookEndpoint.new(self) ],
+        [ '/cookbooks/*/*', CookbookVersionEndpoint.new(self) ],
+        [ '/data', DataBagsEndpoint.new(self) ],
+        [ '/data/*', DataBagEndpoint.new(self) ],
+        [ '/data/*/*', DataBagItemEndpoint.new(self) ],
+        [ '/environments', RestListEndpoint.new(self) ],
+        [ '/environments/*', EnvironmentEndpoint.new(self) ],
+        [ '/environments/*/cookbooks', EnvironmentCookbooksEndpoint.new(self) ],
+        [ '/environments/*/cookbooks/*', EnvironmentCookbookEndpoint.new(self) ],
+        [ '/environments/*/cookbook_versions', EnvironmentCookbookVersionsEndpoint.new(self) ],
+        [ '/environments/*/nodes', EnvironmentNodesEndpoint.new(self) ],
+        [ '/environments/*/recipes', EnvironmentRecipesEndpoint.new(self) ],
+        [ '/environments/*/roles/*', EnvironmentRoleEndpoint.new(self) ],
+        [ '/nodes', RestListEndpoint.new(self) ],
+        [ '/nodes/*', NodeEndpoint.new(self) ],
+        [ '/principals/*', PrincipalEndpoint.new(self) ],
+        [ '/roles', RestListEndpoint.new(self) ],
+        [ '/roles/*', RoleEndpoint.new(self) ],
+        [ '/roles/*/environments', RoleEnvironmentsEndpoint.new(self) ],
+        [ '/roles/*/environments/*', EnvironmentRoleEndpoint.new(self) ],
+        [ '/sandboxes', SandboxesEndpoint.new(self) ],
+        [ '/sandboxes/*', SandboxEndpoint.new(self) ],
+        [ '/search', SearchesEndpoint.new(self) ],
+        [ '/search/*', SearchEndpoint.new(self) ],
+        [ '/users', ActorsEndpoint.new(self) ],
+        [ '/users/*', ActorEndpoint.new(self) ],
 
-        [ '/file_store/*', FileStoreFileEndpoint.new(data) ],
+        [ '/file_store/*', FileStoreFileEndpoint.new(self) ],
       ])
       router.not_found = NotFoundEndpoint.new
       router
@@ -97,15 +100,19 @@ class TinyChefServer < Rack::Server
   PUBLIC_KEY = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0sOY9tHvVtLZ6xmVmH8d\n8LrRrNcWOXbrvvCrai+T3GtRvRSLhksLrpOpD0L9EHM6NdThNF/eGA9Oq+UKAe6y\nXR0hwsKuxKXqQ8SEmlhZZ9GiuggDB/zYD3ItB6SGpdkRe7kQqTChQyrIXqbRkJqx\noTXLyeJDF0sCyTdp3L8IZCUWodM8oV9TlQBJHYtG1gLUwIi8kcMVEoCn2Q8ltCj0\n/ftnwhTtwO52RkWA0uYOLGVayHsLSCFfx+ACWPU/oWCwW5/KBqb3veTv0aEg/nh0\nQsFzRLoTx6SRFI5dT2Nf8iiJe4WCUG8WKEB2G8QPnxsxfOPYDBdTJ4CXEi2e+z41\nVQIDAQAB\n-----END PUBLIC KEY-----\n"
   PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0sOY9tHvVtLZ6xmVmH8d8LrRrNcWOXbrvvCrai+T3GtRvRSL\nhksLrpOpD0L9EHM6NdThNF/eGA9Oq+UKAe6yXR0hwsKuxKXqQ8SEmlhZZ9GiuggD\nB/zYD3ItB6SGpdkRe7kQqTChQyrIXqbRkJqxoTXLyeJDF0sCyTdp3L8IZCUWodM8\noV9TlQBJHYtG1gLUwIi8kcMVEoCn2Q8ltCj0/ftnwhTtwO52RkWA0uYOLGVayHsL\nSCFfx+ACWPU/oWCwW5/KBqb3veTv0aEg/nh0QsFzRLoTx6SRFI5dT2Nf8iiJe4WC\nUG8WKEB2G8QPnxsxfOPYDBdTJ4CXEi2e+z41VQIDAQABAoIBAALhqbW2KQ+G0nPk\nZacwFbi01SkHx8YBWjfCEpXhEKRy0ytCnKW5YO+CFU2gHNWcva7+uhV9OgwaKXkw\nKHLeUJH1VADVqI4Htqw2g5mYm6BPvWnNsjzpuAp+BR+VoEGkNhj67r9hatMAQr0I\nitTvSH5rvd2EumYXIHKfz1K1SegUk1u1EL1RcMzRmZe4gDb6eNBs9Sg4im4ybTG6\npPIytA8vBQVWhjuAR2Tm+wZHiy0Az6Vu7c2mS07FSX6FO4E8SxWf8idaK9ijMGSq\nFvIS04mrY6XCPUPUC4qm1qNnhDPpOr7CpI2OO98SqGanStS5NFlSFXeXPpM280/u\nfZUA0AECgYEA+x7QUnffDrt7LK2cX6wbvn4mRnFxet7bJjrfWIHf+Rm0URikaNma\nh0/wNKpKBwIH+eHK/LslgzcplrqPytGGHLOG97Gyo5tGAzyLHUWBmsNkRksY2sPL\nuHq6pYWJNkqhnWGnIbmqCr0EWih82x/y4qxbJYpYqXMrit0wVf7yAgkCgYEA1twI\ngFaXqesetTPoEHSQSgC8S4D5/NkdriUXCYb06REcvo9IpFMuiOkVUYNN5d3MDNTP\nIdBicfmvfNELvBtXDomEUD8ls1UuoTIXRNGZ0VsZXu7OErXCK0JKNNyqRmOwcvYL\nJRqLfnlei5Ndo1lu286yL74c5rdTLs/nI2p4e+0CgYB079ZmcLeILrmfBoFI8+Y/\ngJLmPrFvXBOE6+lRV7kqUFPtZ6I3yQzyccETZTDvrnx0WjaiFavUPH27WMjY01S2\nTMtO0Iq1MPsbSrglO1as8MvjB9ldFcvp7gy4Q0Sv6XT0yqJ/S+vo8Df0m+H4UBpU\nf5o6EwBSd/UQxwtZIE0lsQKBgQCswfjX8Eg8KL/lJNpIOOE3j4XXE9ptksmJl2sB\njxDnQYoiMqVO808saHVquC/vTrpd6tKtNpehWwjeTFuqITWLi8jmmQ+gNTKsC9Gn\n1Pxf2Gb67PqnEpwQGln+TRtgQ5HBrdHiQIi+5am+gnw89pDrjjO5rZwhanAo6KPJ\n1zcPNQKBgQDxFu8v4frDmRNCVaZS4f1B6wTrcMrnibIDlnzrK9GG6Hz1U7dDv8s8\nNf4UmeMzDXjlPWZVOvS5+9HKJPdPj7/onv8B2m18+lcgTTDJBkza7R1mjL1Cje/Z\nKcVGsryKN6cjE7yCDasnA7R2rVBV/7NWeJV77bmzT5O//rW4yIfUIg==\n-----END RSA PRIVATE KEY-----\n"
 
-  private
-
-  def self.gen_key_pair
-    private_key = OpenSSL::PKey::RSA.new(2048)
-    public_key = private_key.public_key.to_s
-    public_key.sub!(/^-----BEGIN RSA PUBLIC KEY-----/, '-----BEGIN PUBLIC KEY-----')
-    public_key.sub!(/-----END RSA PUBLIC KEY-----(\s+)$/, '-----END PUBLIC KEY-----\1')
-    [private_key.to_s, public_key]
+  def gen_key_pair
+    if generate_real_keys
+      private_key = OpenSSL::PKey::RSA.new(2048)
+      public_key = private_key.public_key.to_s
+      public_key.sub!(/^-----BEGIN RSA PUBLIC KEY-----/, '-----BEGIN PUBLIC KEY-----')
+      public_key.sub!(/-----END RSA PUBLIC KEY-----(\s+)$/, '-----END PUBLIC KEY-----\1')
+      [private_key.to_s, public_key]
+    else
+      [PRIVATE_KEY, PUBLIC_KEY]
+    end
   end
+
+  private
 
   class Router
     def initialize(routes)
@@ -169,11 +176,15 @@ class TinyChefServer < Rack::Server
   end
 
   class RestBase
-    def initialize(data)
-      @data = data
+    def initialize(server)
+      @server = server
     end
 
-    attr_reader :data
+    attr_reader :server
+
+    def data
+      server.data
+    end
 
     def call(env)
       begin
@@ -260,8 +271,8 @@ class TinyChefServer < Rack::Server
 
   # Typical REST list endpoint (/roles or /data/BAG)
   class RestListEndpoint < RestBase
-    def initialize(data, identity_key = 'name')
-      super(data)
+    def initialize(server, identity_key = 'name')
+      super(server)
       @identity_key = identity_key
     end
 
@@ -295,8 +306,8 @@ class TinyChefServer < Rack::Server
 
   # Typical REST leaf endpoint (/roles/NAME or /data/BAG/NAME)
   class RestObjectEndpoint < RestBase
-    def initialize(data, identity_key = 'name')
-      super(data)
+    def initialize(server, identity_key = 'name')
+      super(server)
       @identity_key = identity_key
     end
 
@@ -408,18 +419,21 @@ class TinyChefServer < Rack::Server
       environment
     end
 
-    def self.expand_cookbook(cookbook, name, version, base_uri)
-      cookbook.each_pair do |key, value|
-        if value.is_a?(Array)
-          value.each do |file|
-            if file.is_a?(Hash) && file.has_key?('checksum')
-              file['url'] ||= RestBase::build_uri(base_uri, ['file_store', file['checksum']])
+    def self.expand_cookbook(cookbook, name, version, base_uri, method)
+      # TODO I feel dirty
+      if method != 'PUT'
+        cookbook.each_pair do |key, value|
+          if value.is_a?(Array)
+            value.each do |file|
+              if file.is_a?(Hash) && file.has_key?('checksum')
+                file['url'] ||= RestBase::build_uri(base_uri, ['file_store', file['checksum']])
+              end
             end
           end
         end
       end
       cookbook['name'] ||= "#{name}-#{version}"
-      cookbook['version'] ||= version
+      cookbook['version'] ||= version if method != 'PUT'
       cookbook['cookbook_name'] ||= name
       cookbook['json_class'] ||= 'Chef::CookbookVersion'
       cookbook['chef_type'] ||= 'cookbook_version'
@@ -497,7 +511,7 @@ class TinyChefServer < Rack::Server
       request_body = JSON.parse(request.body, :create_additions => false)
       public_key = request_body['public_key']
       if !public_key
-        private_key, public_key = TinyChefServer::gen_key_pair
+        private_key, public_key = server.gen_key_pair
         request_body['public_key'] = public_key
         request.body = JSON.pretty_generate(request_body)
       end
@@ -532,7 +546,7 @@ class TinyChefServer < Rack::Server
       if request_body.has_key?('private_key')
         body_modified = true
         if request_body['private_key']
-          private_key, public_key = TinyChefServer::gen_key_pair
+          private_key, public_key = server.gen_key_pair
           updating_public_key = true
           request_body['public_key'] = public_key
         end
@@ -587,8 +601,8 @@ class TinyChefServer < Rack::Server
 
   # /data/NAME
   class DataBagEndpoint < RestListEndpoint
-    def initialize(data)
-      super(data, 'id')
+    def initialize(server)
+      super(server, 'id')
     end
 
     def post(request)
@@ -628,8 +642,8 @@ class TinyChefServer < Rack::Server
 
   # /data/NAME/NAME
   class DataBagItemEndpoint < RestObjectEndpoint
-    def initialize(data)
-      super(data, 'id')
+    def initialize(server)
+      super(server, 'id')
     end
 
     def populate_defaults(request, response_json)
@@ -671,8 +685,8 @@ class TinyChefServer < Rack::Server
 
   # /sandboxes
   class SandboxesEndpoint < RestBase
-    def initialize(data)
-      super(data)
+    def initialize(server)
+      super(server)
       @next_id = 1
     end
 
@@ -900,10 +914,10 @@ class TinyChefServer < Rack::Server
             raise RestErrorResponse.new(409, "The cookbook #{name} at version #{version} is frozen. Use the 'force' option to override.")
           end
           # For some reason, you are forever unable to modify "frozen?" on a frozen cookbook.
-          request_json = JSON.parse(request.body, :create_additions => false)
-          if !request_json['frozen?']
-            request_json['frozen?'] = true
-            request.body = JSON.pretty_generate(request_json)
+          request_body = JSON.parse(request.body, :create_additions => false)
+          if !request_body['frozen?']
+            request_body['frozen?'] = true
+            request.body = JSON.pretty_generate(request_body)
           end
         end
       end
@@ -961,7 +975,7 @@ class TinyChefServer < Rack::Server
     def populate_defaults(request, response_json)
       # Inject URIs into each cookbook file
       cookbook = JSON.parse(response_json, :create_additions => false)
-      cookbook = DataExpander.expand_cookbook(cookbook, request.rest_path[1], request.rest_path[2], request.base_uri)
+      cookbook = DataExpander.expand_cookbook(cookbook, request.rest_path[1], request.rest_path[2], request.base_uri, request.method)
       JSON.pretty_generate(cookbook)
     end
 
