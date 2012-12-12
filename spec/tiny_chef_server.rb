@@ -171,7 +171,9 @@ class TinyChefServer < Rack::Server
         rest_path = env['PATH_INFO'].split('/').select { |part| part != "" }
         method = env['REQUEST_METHOD'].downcase.to_sym
         if !self.respond_to?(method)
-          return error(405, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}")
+          accept_methods = [:get, :put, :post, :delete].select { |m| self.respond_to?(m) }
+          accept_methods_str = accept_methods.map { |m| m.to_s.upcase }.join(', ')
+          return [405, {"Content-Type" => "text/plain", "Allow" => accept_methods_str}, "Bad request method for '#{env['REQUEST_PATH']}': #{env['REQUEST_METHOD']}"]
         end
         if json_only && !env['HTTP_ACCEPT'].split(';').include?('application/json')
           return [406, {"Content-Type" => "text/plain"}, "Must accept application/json"]
