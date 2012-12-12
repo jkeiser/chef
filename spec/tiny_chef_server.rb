@@ -497,8 +497,13 @@ class TinyChefServer < Rack::Server
       # PUT /clients is patchy
       request.body = patch_request_body(request)
 
-      # Honor private_key
       request_body = JSON.parse(request.body, :create_additions => false)
+      updating_public_key = request_body['public_key']
+      if !updating_public_key
+        # If public_key is nil, we don't update it
+        request_body.delete('public_key')
+      end
+      # Honor private_key
       gen_private_key = request_body['private_key']
       if request_body.has_key?('private_key')
         request_body.delete('private_key')
@@ -511,6 +516,8 @@ class TinyChefServer < Rack::Server
       if result[0] == 200
         response = JSON.parse(result[2], :create_additions => false)
         response['private_key'] = PRIVATE_KEY if gen_private_key
+        response.delete('public_key') if !updating_public_key && !gen_private_key && request.rest_path[0] == 'users'
+        response.delete('password')
         json_response(200, response)
       else
         result
