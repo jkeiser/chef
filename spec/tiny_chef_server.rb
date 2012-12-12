@@ -330,12 +330,9 @@ class TinyChefServer < Rack::Server
           return error(409, "Cannot rename '#{request.rest_path[-1]}' to '#{key}': '#{key}' already exists")
         end
         container.delete(request.rest_path[-1])
-        container[key] = request.body
-        already_json_response(201, populate_defaults(request, request.body))
-      else
-        container[key] = request.body
-        already_json_response(200, populate_defaults(request, request.body))
       end
+      container[key] = request.body
+      already_json_response(200, populate_defaults(request, request.body))
     end
 
     def delete(request)
@@ -567,7 +564,12 @@ class TinyChefServer < Rack::Server
         response['private_key'] = private_key if private_key
         response.delete('public_key') if !updating_public_key && request.rest_path[0] == 'users'
         response.delete('password')
-        json_response(200, response)
+        # For PUT /clients, a rename returns 201.
+        if request_body['name'] && request.rest_path[1] != request_body['name']
+          json_response(201, response)
+        else
+          json_response(200, response)
+        end
       else
         result
       end
