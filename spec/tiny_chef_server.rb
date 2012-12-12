@@ -268,13 +268,17 @@ class TinyChefServer < Rack::Server
     def post(request)
       container = get_data(request)
       contents = request.body
-      key = JSON.parse(contents, :create_additions => false)[identity_key]
+      key = get_key(contents)
       if container[key]
         error(409, 'Object already exists')
       else
         container[key] = contents
         json_response(201, {'uri' => "#{build_uri(request.base_uri, request.rest_path + [key])}"})
       end
+    end
+
+    def get_key(contents)
+      JSON.parse(contents, :create_additions => false)[identity_key]
     end
   end
 
@@ -563,6 +567,15 @@ class TinyChefServer < Rack::Server
         already_json_response(201, DataBagItemEndpoint::populate_defaults(request, request.body, request.rest_path[1], key))
       else
         response
+      end
+    end
+
+    def get_key(contents)
+      data_bag_item = JSON.parse(contents, :create_additions => false)
+      if data_bag_item['json_class'] == 'Chef::DataBagItem' && data_bag_item['raw_data']
+        data_bag_item['raw_data']['id']
+      else
+        data_bag_item['id']
       end
     end
 
