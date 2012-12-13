@@ -430,7 +430,8 @@ class TinyChefServer < Rack::Server
         end
       end
       cookbook['name'] ||= "#{name}-#{version}"
-      cookbook['version'] ||= version if method != 'PUT'
+      # TODO this feels wrong, but the real chef server doesn't expand this default
+#      cookbook['version'] ||= version
       cookbook['cookbook_name'] ||= name
       cookbook['json_class'] ||= 'Chef::CookbookVersion'
       cookbook['chef_type'] ||= 'cookbook_version'
