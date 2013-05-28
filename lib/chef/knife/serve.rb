@@ -177,11 +177,16 @@ class Chef
 
           elsif path[0] == 'cookbooks' && path.length == 1
             with_entry(path) do |entry|
-              if Chef::Config.versioned_cookbooks
-                # /cookbooks/name-version -> /cookbooks/name
-                entry.children.map { |child| split_name_version(child.name)[0] }.uniq
-              else
-                entry.children.map { |child| child.name }
+              begin
+                if Chef::Config.versioned_cookbooks
+                  # /cookbooks/name-version -> /cookbooks/name
+                  entry.children.map { |child| split_name_version(child.name)[0] }.uniq
+                else
+                  entry.children.map { |child| child.name }
+                end
+              rescue Chef::ChefFS::FileSystem::NotFoundError
+                # If the cookbooks dir doesn't exist, we have no cookbooks (not 404)
+                []
               end
             end
 
@@ -199,7 +204,16 @@ class Chef
 
           else
             with_entry(path) do |entry|
-              entry.children.map { |c| to_leaf_name(c) }.sort
+              begin
+                entry.children.map { |c| to_leaf_name(c) }.sort
+              rescue Chef::ChefFS::FileSystem::NotFoundError
+                # /cookbooks, /data, etc. never return 404
+                if path_always_exists?(path)
+                  []
+                else
+                  raise
+                end
+              end
             end
           end
         end
@@ -208,7 +222,7 @@ class Chef
           if is_memory_store(path)
             @memory_store.exists?(path)
           else
-            Chef::ChefFS::FileSystem.resolve_path(chef_fs, path_to_chef_fs(path)).exists?
+            path_always_exists?(path) || Chef::ChefFS::FileSystem.resolve_path(chef_fs, path_to_chef_fs(path)).exists?
           end
         end
 
@@ -332,6 +346,10 @@ class Chef
 
         def to_leaf_name(entry)
           to_zero_path(entry)[-1]
+        end
+
+        def path_always_exists?(path)
+          return path.length == 1 && %w(clients cookbooks data_bags environments nodes roles users).include?(path[0])
         end
 
         def with_entry(path)
