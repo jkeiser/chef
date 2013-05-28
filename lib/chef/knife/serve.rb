@@ -251,6 +251,7 @@ class Chef
           else
             cookbook_path = "cookbooks/#{path[1]}"
           end
+          puts "Write cookbook #{cookbook_path}"
           cookbook_fs = Chef::ChefFS::FileSystem::MemoryRoot.new('uploading')
           cookbook = JSON.parse(data, :create_additions => false)
           cookbook.each_pair do |key, value|
@@ -266,7 +267,7 @@ class Chef
 
           # Use the copy/diff algorithm to copy it down so we don't destroy
           # chefignored data.  This is terribly un-thread-safe.
-          Chef::ChefFS::FileSystem.copy_to(Chef::ChefFS::FilePattern.new(cookbook_path), cookbook_fs, chef_fs, nil, {:purge => true})
+          Chef::ChefFS::FileSystem.copy_to(Chef::ChefFS::FilePattern.new("/#{cookbook_path}"), cookbook_fs, chef_fs, nil, {:purge => true})
         end
 
         def split_name_version(entry_name)
