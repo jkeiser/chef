@@ -12,7 +12,7 @@ require 'chef_zero/data_store/data_not_found_error'
 
 class Chef
   class Knife
-    class Zero < Chef::ChefFS::Knife
+    class Serve < Chef::ChefFS::Knife
       banner "knife show [PATTERN1 ... PATTERNn]"
 
       common_options
