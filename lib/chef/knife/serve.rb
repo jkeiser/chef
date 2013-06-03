@@ -1,21 +1,22 @@
 require 'chef/chef_fs/knife'
-require 'chef_zero/server'
-require 'chef_zero/data_store/memory_store'
-
-# For ChefFSStore
-require 'chef/chef_fs/file_pattern'
-require 'chef/chef_fs/file_system'
-require 'chef/chef_fs/file_system/not_found_error'
-require 'chef/chef_fs/file_system/memory_root'
-require 'chef_zero/data_store/data_already_exists_error'
-require 'chef_zero/data_store/data_not_found_error'
 
 class Chef
   class Knife
     class Serve < Chef::ChefFS::Knife
       banner "knife show [PATTERN1 ... PATTERNn]"
 
-      common_options
+      deps do
+        require 'chef_zero/server'
+        require 'chef_zero/data_store/memory_store'
+
+        # For ChefFSStore
+        require 'chef/chef_fs/file_pattern'
+        require 'chef/chef_fs/file_system'
+        require 'chef/chef_fs/file_system/not_found_error'
+        require 'chef/chef_fs/file_system/memory_root'
+        require 'chef_zero/data_store/data_already_exists_error'
+        require 'chef_zero/data_store/data_not_found_error'
+      end
 
       option :remote,
         :long => '--remote',
