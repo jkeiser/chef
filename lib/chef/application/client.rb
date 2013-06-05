@@ -197,6 +197,12 @@ class Chef::Application::Client < Chef::Application
     :description  => "Enable reporting data collection for chef runs",
     :boolean      => true
 
+  option :local,
+    :short        => "-0",
+    :long         => "--local",
+    :description  => "Run locally from the current directory",
+    :boolean      => true
+
   if Chef::Platform.windows?
     option :fatal_windows_admin_check,
       :short        => "-A",
@@ -254,6 +260,24 @@ class Chef::Application::Client < Chef::Application
         Chef::Application.fatal!("Could not parse the provided JSON file (#{Chef::Config[:json_attribs]})!: " + error.message, 2)
       end
     end
+
+    if config[:local]
+      Chef::Config[:chef_repo_path] = Dir.pwd
+
+      require 'chef_zero/server'
+      require 'chef/chef_fs/config'
+      require 'chef/chef_fs/chef_fs_data_store'
+      require 'fileutils'
+      @chef_fs_config = Chef::ChefFS::Config.new(Chef::Config, Dir.pwd)
+
+      # Set up Chef::Config variables
+      @temp_cache = Dir.mktmpdir('chef_client_local')
+      Chef::Config[:chef_server_url] = "http://127.0.0.1:4000"
+      Chef::Config[:validation_key] = nil
+      Chef::Config[:file_cache_path] = File.join(@temp_cache, 'cache')
+      Chef::Config[:file_checksum_path] = File.join(@temp_cache, 'checksums')
+      Chef::Config[:client_key] = File.join(Chef::Config[:chef_repo_path], '.chef', 'client.pem')
+    end
   end
 
   def configure_logging
@@ -287,11 +311,29 @@ class Chef::Application::Client < Chef::Application
       puts "Chef version: #{::Chef::VERSION}"
     end
 
+    if config[:local]
+      # Set up the server
+      server_options = {}
+      server_options[:data_store] = Chef::ChefFS::ChefFSDataStore.new(proc { @chef_fs_config.create_local_fs })
+      server_options[:log_level] = Chef::Log.level
+      server_options[:port] = 4000
+      server_options[:generate_real_keys] = true
+      server = ChefZero::Server.new(server_options)
+
+      dot_chef = File.dirname(Chef::Config[:client_key])
+      Dir.mkdir(dot_chef) if !File.exists?(dot_chef)
+    end
+
     if Chef::Config[:daemonize]
       Chef::Daemon.daemonize("chef-client")
     end
 
     loop do
+
+      if config[:local]
+        server.start_background
+      end
+
       begin
         Chef::Application.exit!("Exiting", 0) if @exit_gracefully
         if Chef::Config[:splay]
@@ -329,8 +371,15 @@ class Chef::Application::Client < Chef::Application
           Chef::Application.debug_stacktrace(e)
           Chef::Application.fatal!("#{e.class}: #{e.message}", 1)
         end
+      ensure
+        if config[:local]
+          server.stop
+        end
       end
     end
+  ensure
+    # TODO check if there are situations where we won't clean the cache up
+    FileUtils.remove_entry_secure(@temp_cache)
   end
 
   private
